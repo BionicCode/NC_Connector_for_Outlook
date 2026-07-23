@@ -232,12 +232,23 @@ internal static class OutlookFileLinkRenderingTests
         {
             IElement permissionCell = permissionCells[index];
             AttributeEquals(caseName + " item " + (index + 1) + " nowrap", permissionCell, "nowrap", "nowrap");
+            AttributeEquals(caseName + " item " + (index + 1) + " valign", permissionCell, "valign", "middle");
             Dictionary<string, string> parentStyle = ParseStyle(permissionCell);
+            string expectedPadding = index == permissionCells.Count - 1 ? "0" : "0 12px 0 0";
             StyleEquals(
                 caseName + " item " + (index + 1) + " spacing",
                 parentStyle,
                 "padding",
-                index == permissionCells.Count - 1 ? "0 0 0 0" : "0 12px 0 0");
+                expectedPadding);
+            if (requireEncodedEntities)
+            {
+                string actualPadding;
+                bool hasPadding = parentStyle.TryGetValue("padding", out actualPadding);
+                Check(
+                    caseName + " item " + (index + 1) + " direct spacing syntax",
+                    hasPadding && string.Equals(expectedPadding, actualPadding, StringComparison.Ordinal),
+                    "expected '" + expectedPadding + "', got '" + (actualPadding ?? "<missing>") + "'");
+            }
             StyleEquals(caseName + " item " + (index + 1) + " white space", parentStyle, "white-space", "nowrap");
             StyleEquals(caseName + " item " + (index + 1) + " vertical alignment", parentStyle, "vertical-align", "middle");
 
@@ -267,7 +278,7 @@ internal static class OutlookFileLinkRenderingTests
             StyleEquals(caseName + " icon " + (index + 1) + " font size", iconStyle, "font-size", "11px");
             StyleEquals(caseName + " icon " + (index + 1) + " font weight", iconStyle, "font-weight", "700");
             StyleEquals(caseName + " icon " + (index + 1) + " line height", iconStyle, "line-height", "14px");
-            StyleEquals(caseName + " icon " + (index + 1) + " Outlook line-height rule", iconStyle, "mso-line-height-rule", "exactly");
+            Check(caseName + " icon " + (index + 1) + " omits MSO line-height rule", !iconStyle.ContainsKey("mso-line-height-rule"), iconCell.GetAttribute("style"));
             StyleEquals(caseName + " icon " + (index + 1) + " text alignment", iconStyle, "text-align", "center");
             StyleEquals(caseName + " icon " + (index + 1) + " vertical alignment", iconStyle, "vertical-align", "middle");
             Check(caseName + " icon " + (index + 1) + " symbol", string.Equals(iconCell.TextContent.Trim(), expectedSymbol, StringComparison.Ordinal), iconCell.TextContent);
@@ -276,7 +287,8 @@ internal static class OutlookFileLinkRenderingTests
             AttributeEquals(caseName + " label " + (index + 1) + " nowrap", labelCell, "nowrap", "nowrap");
             AttributeEquals(caseName + " label " + (index + 1) + " valign", labelCell, "valign", "middle");
             Dictionary<string, string> labelStyle = ParseStyle(labelCell);
-            StyleEquals(caseName + " label " + (index + 1) + " spacing", labelStyle, "padding", "0 0 0 5px");
+            StyleEquals(caseName + " label " + (index + 1) + " spacing", labelStyle, "padding-left", "5px");
+            Check(caseName + " label " + (index + 1) + " avoids padding shorthand", !labelStyle.ContainsKey("padding"), labelCell.GetAttribute("style"));
             StyleEquals(caseName + " label " + (index + 1) + " white space", labelStyle, "white-space", "nowrap");
             StyleEquals(caseName + " label " + (index + 1) + " font weight", labelStyle, "font-weight", "600");
             StyleEquals(caseName + " label " + (index + 1) + " vertical alignment", labelStyle, "vertical-align", "middle");
