@@ -450,6 +450,9 @@ accept action align alt autocapitalize autocomplete autopictureinpicture autopla
             {
                 sanitizer.AllowedAttributes.Add(attribute);
             }
+            // Generated Rights icon cells use this Outlook-specific property to
+            // keep their fixed 14px line box stable after custom-template sanitization.
+            sanitizer.AllowedCssProperties.Add("mso-line-height-rule");
             return sanitizer;
         }
 
