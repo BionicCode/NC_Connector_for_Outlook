@@ -171,6 +171,21 @@ internal static class OutlookFileLinkRenderingTests
         StyleEquals(name + " margin", style, "margin", "0");
     }
 
+    private static void AssertIconPresentationTable(string name, IElement table)
+    {
+        AttributeEquals(name + " role", table, "role", "presentation");
+        AttributeEquals(name + " border", table, "border", "0");
+        AttributeEquals(name + " cellspacing", table, "cellspacing", "0");
+        AttributeEquals(name + " cellpadding", table, "cellpadding", "0");
+        AttributeEquals(name + " width", table, "width", "14");
+        AttributeEquals(name + " height", table, "height", "14");
+        Dictionary<string, string> style = ParseStyle(table);
+        StyleEquals(name + " border collapse", style, "border-collapse", "collapse");
+        StyleEquals(name + " CSS width", style, "width", "14px");
+        StyleEquals(name + " CSS height", style, "height", "14px");
+        StyleEquals(name + " margin", style, "margin", "0");
+    }
+
     private static int CountOccurrences(string value, string token)
     {
         int count = 0;
@@ -213,10 +228,10 @@ internal static class OutlookFileLinkRenderingTests
         }
         IElement outerTable = body.Children.First();
         Check(caseName + " outer element is a table", string.Equals(outerTable.TagName, "table", StringComparison.OrdinalIgnoreCase), outerTable.OuterHtml);
-        Check(caseName + " table count", body.QuerySelectorAll("table").Count() == 5, html);
-        Check(caseName + " tbody count", body.QuerySelectorAll("tbody").Count() == 5, html);
-        Check(caseName + " row count", body.QuerySelectorAll("tr").Count() == 5, html);
-        Check(caseName + " cell count", body.QuerySelectorAll("td").Count() == 12, html);
+        Check(caseName + " table count", body.QuerySelectorAll("table").Count() == 9, html);
+        Check(caseName + " tbody count", body.QuerySelectorAll("tbody").Count() == 9, html);
+        Check(caseName + " row count", body.QuerySelectorAll("tr").Count() == 9, html);
+        Check(caseName + " cell count", body.QuerySelectorAll("td").Count() == 16, html);
         AssertPresentationTable(caseName + " outer table", outerTable);
 
         IElement outerBody = SingleDirectChild(caseName + " outer tbody", outerTable, "tbody");
@@ -251,21 +266,37 @@ internal static class OutlookFileLinkRenderingTests
             }
             StyleEquals(caseName + " item " + (index + 1) + " white space", parentStyle, "white-space", "nowrap");
             StyleEquals(caseName + " item " + (index + 1) + " vertical alignment", parentStyle, "vertical-align", "middle");
+            Check(caseName + " item " + (index + 1) + " permission wrapper is unbordered", !parentStyle.ContainsKey("border"), permissionCell.GetAttribute("style"));
 
-            IElement nestedTable = SingleDirectChild(caseName + " item " + (index + 1) + " nested table", permissionCell, "table");
-            AssertPresentationTable(caseName + " nested table " + (index + 1), nestedTable);
-            IElement nestedBody = SingleDirectChild(caseName + " item " + (index + 1) + " nested tbody", nestedTable, "tbody");
-            IElement nestedRow = SingleDirectChild(caseName + " item " + (index + 1) + " nested row", nestedBody, "tr");
+            IElement nestedTable = SingleDirectChild(caseName + " item " + (index + 1) + " permission-group table", permissionCell, "table");
+            AssertPresentationTable(caseName + " permission-group table " + (index + 1), nestedTable);
+            IElement nestedBody = SingleDirectChild(caseName + " item " + (index + 1) + " permission-group tbody", nestedTable, "tbody");
+            IElement nestedRow = SingleDirectChild(caseName + " item " + (index + 1) + " permission-group row", nestedBody, "tr");
             List<IElement> iconAndLabelCells = DirectChildren(nestedRow, "td");
-            Check(caseName + " item " + (index + 1) + " icon-label cell count", iconAndLabelCells.Count == 2, "count=" + iconAndLabelCells.Count);
+            Check(caseName + " item " + (index + 1) + " icon-wrapper and label cell count", iconAndLabelCells.Count == 2, "count=" + iconAndLabelCells.Count);
             if (iconAndLabelCells.Count != 2)
             {
                 continue;
             }
 
-            IElement iconCell = iconAndLabelCells[0];
+            IElement iconWrapperCell = iconAndLabelCells[0];
+            AttributeEquals(caseName + " icon wrapper " + (index + 1) + " width", iconWrapperCell, "width", "14");
+            AttributeEquals(caseName + " icon wrapper " + (index + 1) + " height", iconWrapperCell, "height", "14");
+            AttributeEquals(caseName + " icon wrapper " + (index + 1) + " valign", iconWrapperCell, "valign", "middle");
+            Dictionary<string, string> iconWrapperStyle = ParseStyle(iconWrapperCell);
+            StyleEquals(caseName + " icon wrapper " + (index + 1) + " CSS width", iconWrapperStyle, "width", "14px");
+            StyleEquals(caseName + " icon wrapper " + (index + 1) + " CSS height", iconWrapperStyle, "height", "14px");
+            StyleEquals(caseName + " icon wrapper " + (index + 1) + " padding", iconWrapperStyle, "padding", "0");
+            StyleEquals(caseName + " icon wrapper " + (index + 1) + " vertical alignment", iconWrapperStyle, "vertical-align", "middle");
+            Check(caseName + " icon wrapper " + (index + 1) + " is unbordered", !iconWrapperStyle.ContainsKey("border"), iconWrapperCell.GetAttribute("style"));
+
+            IElement iconTable = SingleDirectChild(caseName + " icon wrapper " + (index + 1) + " icon-only table", iconWrapperCell, "table");
+            AssertIconPresentationTable(caseName + " icon table " + (index + 1), iconTable);
+            IElement iconBody = SingleDirectChild(caseName + " icon table " + (index + 1) + " tbody", iconTable, "tbody");
+            IElement iconRow = SingleDirectChild(caseName + " icon table " + (index + 1) + " row", iconBody, "tr");
+            IElement iconCell = SingleDirectChild(caseName + " icon table " + (index + 1) + " bordered cell", iconRow, "td");
             string expectedColor = enabledStates[index] ? "#0082c9" : "#c62828";
-            string expectedSymbol = enabledStates[index] ? "✓" : "✗";
+            string expectedSymbol = enabledStates[index] ? "\u2713" : "\u2717";
             AttributeEquals(caseName + " icon " + (index + 1) + " width", iconCell, "width", "14");
             AttributeEquals(caseName + " icon " + (index + 1) + " height", iconCell, "height", "14");
             AttributeEquals(caseName + " icon " + (index + 1) + " align", iconCell, "align", "center");
@@ -278,6 +309,7 @@ internal static class OutlookFileLinkRenderingTests
             StyleEquals(caseName + " icon " + (index + 1) + " font size", iconStyle, "font-size", "11px");
             StyleEquals(caseName + " icon " + (index + 1) + " font weight", iconStyle, "font-weight", "700");
             StyleEquals(caseName + " icon " + (index + 1) + " line height", iconStyle, "line-height", "14px");
+            StyleEquals(caseName + " icon " + (index + 1) + " padding", iconStyle, "padding", "0");
             Check(caseName + " icon " + (index + 1) + " omits MSO line-height rule", !iconStyle.ContainsKey("mso-line-height-rule"), iconCell.GetAttribute("style"));
             StyleEquals(caseName + " icon " + (index + 1) + " text alignment", iconStyle, "text-align", "center");
             StyleEquals(caseName + " icon " + (index + 1) + " vertical alignment", iconStyle, "vertical-align", "middle");
@@ -328,10 +360,10 @@ internal static class OutlookFileLinkRenderingTests
 
         string[] longLabels =
         {
-            "Leseberechtigung für sehr lange Übersetzung",
+            "Leseberechtigung f\u00fcr sehr lange \u00dcbersetzung",
             "Hochladen und neue Dateien erstellen",
-            "Vorhandene Dokumente vollständig bearbeiten",
-            "Freigegebene Inhalte dauerhaft löschen"
+            "Vorhandene Dokumente vollst\u00e4ndig bearbeiten",
+            "Freigegebene Inhalte dauerhaft l\u00f6schen"
         };
         AssertPermissionsHtmlContract(
             "Long translated Rights HTML",
@@ -535,10 +567,10 @@ internal static class OutlookFileLinkRenderingTests
 
         foreach (string output in new[] { html, plainText })
         {
-            Check("Backend template language localizes LINK_INTRO", output.Contains("Öffnen Sie den untenstehenden Nextcloud-Link"), output);
+            Check("Backend template language localizes LINK_INTRO", output.Contains("\u00d6ffnen Sie den untenstehenden Nextcloud-Link"), output);
             Check("Backend template language localizes LINK_LABEL", output.Contains("Nextcloud-Link"), output);
             Check("Backend template language localizes separate-password hint", output.Contains("Das Passwort wird in einer separaten E-Mail gesendet."), output);
-            Check("Backend template language localizes permission names", output.Contains("Lesen") && output.Contains("Hochladen") && output.Contains("Bearbeiten") && output.Contains("Löschen"), output);
+            Check("Backend template language localizes permission names", output.Contains("Lesen") && output.Contains("Hochladen") && output.Contains("Bearbeiten") && output.Contains("L\u00f6schen"), output);
         }
     }
 

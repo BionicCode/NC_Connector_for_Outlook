@@ -819,7 +819,7 @@ namespace NcTalkOutlookAddIn.Utilities
             builder.Append("<table role=\"presentation\" border=\"0\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse: collapse; width: auto; margin: 0;\"><tbody><tr>");
             builder.AppendFormat(
                 CultureInfo.InvariantCulture,
-                "<td width=\"14\" height=\"14\" align=\"center\" valign=\"middle\" style=\"width: 14px; height: 14px; border: 1px solid {0}; color: {0}; font-size: 11px; font-weight: 700; line-height: 14px; text-align: center; vertical-align: middle;\">{1}</td>",
+                "<td width=\"14\" height=\"14\" valign=\"middle\" style=\"width: 14px; height: 14px; padding: 0; vertical-align: middle;\"><table role=\"presentation\" border=\"0\" cellspacing=\"0\" cellpadding=\"0\" width=\"14\" height=\"14\" style=\"border-collapse: collapse; width: 14px; height: 14px; margin: 0;\"><tbody><tr><td width=\"14\" height=\"14\" align=\"center\" valign=\"middle\" style=\"width: 14px; height: 14px; border: 1px solid {0}; color: {0}; font-size: 11px; font-weight: 700; line-height: 14px; padding: 0; text-align: center; vertical-align: middle;\">{1}</td></tr></tbody></table></td>",
                 color,
                 enabled ? "&#10003;" : "&#10007;");
             builder.AppendFormat(
