@@ -12,6 +12,11 @@ try {
     @'
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Text.RegularExpressions;
+using AngleSharp.Dom;
+using AngleSharp.Html.Parser;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Utilities;
 
@@ -46,9 +51,352 @@ internal static class OutlookFileLinkRenderingTests
         Console.Error.WriteLine("[FAIL] " + name + (string.IsNullOrEmpty(detail) ? "" : ": " + detail));
     }
 
+    private static string BuildPermissionsHtml(FileLinkPermissionFlags permissions, string[] labels)
+    {
+        MethodInfo generator = typeof(FileLinkHtmlBuilder).GetMethod(
+            "BuildPermissions",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Check("Rights HTML generator is discoverable", generator != null);
+        if (generator == null)
+        {
+            return string.Empty;
+        }
+        return (string)generator.Invoke(null, new object[]
+        {
+            permissions,
+            labels[0],
+            labels[1],
+            labels[2],
+            labels[3]
+        });
+    }
+
+    private static Dictionary<string, string> ParseStyle(IElement element)
+    {
+        var properties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string style = element == null ? string.Empty : (element.GetAttribute("style") ?? string.Empty);
+        foreach (string declaration in style.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            int separator = declaration.IndexOf(':');
+            if (separator < 0)
+            {
+                continue;
+            }
+            string name = declaration.Substring(0, separator).Trim();
+            string value = Regex.Replace(declaration.Substring(separator + 1).Trim(), @"\s+", " ");
+            if (name.Length > 0)
+            {
+                properties[name] = value;
+            }
+        }
+        return properties;
+    }
+
+    private static List<IElement> DirectChildren(IElement parent, string tagName)
+    {
+        if (parent == null)
+        {
+            return new List<IElement>();
+        }
+        return parent.Children
+            .Where(child => string.Equals(child.TagName, tagName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private static IElement SingleDirectChild(string name, IElement parent, string tagName)
+    {
+        List<IElement> children = DirectChildren(parent, tagName);
+        Check(name, children.Count == 1, "count=" + children.Count);
+        return children.Count == 1 ? children[0] : null;
+    }
+
+    private static void AttributeEquals(string name, IElement element, string attributeName, string expected)
+    {
+        string actual = element == null ? null : element.GetAttribute(attributeName);
+        Check(name, string.Equals(expected, actual, StringComparison.Ordinal), "expected '" + expected + "', got '" + actual + "'");
+    }
+
+    private static void StyleEquals(string name, Dictionary<string, string> style, string propertyName, string expected)
+    {
+        string actual;
+        bool present = style.TryGetValue(propertyName, out actual);
+        string normalizedExpected = NormalizeCssValue(propertyName, expected);
+        string normalizedActual = NormalizeCssValue(propertyName, actual);
+        Check(name, present && string.Equals(normalizedExpected, normalizedActual, StringComparison.OrdinalIgnoreCase), "expected '" + expected + "', got '" + (actual ?? "<missing>") + "'");
+    }
+
+    private static string NormalizeCssValue(string propertyName, string value)
+    {
+        string normalized = Regex.Replace(
+            value ?? string.Empty,
+            @"rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)",
+            delegate (Match match)
+            {
+                return "#"
+                    + int.Parse(match.Groups[1].Value).ToString("x2")
+                    + int.Parse(match.Groups[2].Value).ToString("x2")
+                    + int.Parse(match.Groups[3].Value).ToString("x2");
+            },
+            RegexOptions.IgnoreCase);
+        normalized = Regex.Replace(normalized.Trim(), @"\s+", " ");
+        if (!string.Equals(propertyName, "padding", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+        string[] parts = normalized.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1)
+        {
+            return string.Join(" ", new[] { parts[0], parts[0], parts[0], parts[0] });
+        }
+        if (parts.Length == 2)
+        {
+            return string.Join(" ", new[] { parts[0], parts[1], parts[0], parts[1] });
+        }
+        if (parts.Length == 3)
+        {
+            return string.Join(" ", new[] { parts[0], parts[1], parts[2], parts[1] });
+        }
+        return normalized;
+    }
+
+    private static void AssertPresentationTable(string name, IElement table)
+    {
+        AttributeEquals(name + " role", table, "role", "presentation");
+        AttributeEquals(name + " border", table, "border", "0");
+        AttributeEquals(name + " cellspacing", table, "cellspacing", "0");
+        AttributeEquals(name + " cellpadding", table, "cellpadding", "0");
+        Dictionary<string, string> style = ParseStyle(table);
+        StyleEquals(name + " border collapse", style, "border-collapse", "collapse");
+        StyleEquals(name + " natural width", style, "width", "auto");
+        StyleEquals(name + " margin", style, "margin", "0");
+    }
+
+    private static void AssertIconPresentationTable(string name, IElement table)
+    {
+        AttributeEquals(name + " role", table, "role", "presentation");
+        AttributeEquals(name + " border", table, "border", "0");
+        AttributeEquals(name + " cellspacing", table, "cellspacing", "0");
+        AttributeEquals(name + " cellpadding", table, "cellpadding", "0");
+        AttributeEquals(name + " width", table, "width", "14");
+        AttributeEquals(name + " height", table, "height", "14");
+        Dictionary<string, string> style = ParseStyle(table);
+        StyleEquals(name + " border collapse", style, "border-collapse", "collapse");
+        StyleEquals(name + " CSS width", style, "width", "14px");
+        StyleEquals(name + " CSS height", style, "height", "14px");
+        StyleEquals(name + " margin", style, "margin", "0");
+    }
+
+    private static int CountOccurrences(string value, string token)
+    {
+        int count = 0;
+        int offset = 0;
+        while (!string.IsNullOrEmpty(value) && !string.IsNullOrEmpty(token))
+        {
+            int index = value.IndexOf(token, offset, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                break;
+            }
+            count++;
+            offset = index + token.Length;
+        }
+        return count;
+    }
+
+    private static void AssertPermissionsHtmlContract(
+        string caseName,
+        string html,
+        string[] labels,
+        bool[] enabledStates,
+        bool requireEncodedEntities)
+    {
+        Check(caseName + " avoids flexbox", !Regex.IsMatch(html ?? string.Empty, @"display\s*:\s*(?:inline-)?flex", RegexOptions.IgnoreCase), html);
+        Check(caseName + " avoids CSS grid", !Regex.IsMatch(html ?? string.Empty, @"display\s*:\s*(?:inline-)?grid", RegexOptions.IgnoreCase), html);
+        if (requireEncodedEntities)
+        {
+            Check(caseName + " check entity count", CountOccurrences(html, "&#10003;") == enabledStates.Count(enabled => enabled), html);
+            Check(caseName + " cross entity count", CountOccurrences(html, "&#10007;") == enabledStates.Count(enabled => !enabled), html);
+        }
+
+        var parser = new HtmlParser();
+        var document = parser.ParseDocument("<!doctype html><html><body>" + (html ?? string.Empty) + "</body></html>");
+        IElement body = document.Body;
+        Check(caseName + " outer element count", body != null && body.Children.Count() == 1, html);
+        if (body == null || body.Children.Count() != 1)
+        {
+            return;
+        }
+        IElement outerTable = body.Children.First();
+        Check(caseName + " outer element is a table", string.Equals(outerTable.TagName, "table", StringComparison.OrdinalIgnoreCase), outerTable.OuterHtml);
+        Check(caseName + " table count", body.QuerySelectorAll("table").Count() == 9, html);
+        Check(caseName + " tbody count", body.QuerySelectorAll("tbody").Count() == 9, html);
+        Check(caseName + " row count", body.QuerySelectorAll("tr").Count() == 9, html);
+        Check(caseName + " cell count", body.QuerySelectorAll("td").Count() == 16, html);
+        AssertPresentationTable(caseName + " outer table", outerTable);
+
+        IElement outerBody = SingleDirectChild(caseName + " outer tbody", outerTable, "tbody");
+        IElement outerRow = SingleDirectChild(caseName + " parent row", outerBody, "tr");
+        List<IElement> permissionCells = DirectChildren(outerRow, "td");
+        Check(caseName + " parent permission cell count", permissionCells.Count == 4, "count=" + permissionCells.Count);
+        if (permissionCells.Count != 4)
+        {
+            return;
+        }
+
+        for (int index = 0; index < permissionCells.Count; index++)
+        {
+            IElement permissionCell = permissionCells[index];
+            AttributeEquals(caseName + " item " + (index + 1) + " nowrap", permissionCell, "nowrap", "nowrap");
+            AttributeEquals(caseName + " item " + (index + 1) + " valign", permissionCell, "valign", "middle");
+            Dictionary<string, string> parentStyle = ParseStyle(permissionCell);
+            string expectedPadding = index == permissionCells.Count - 1 ? "0" : "0 12px 0 0";
+            StyleEquals(
+                caseName + " item " + (index + 1) + " spacing",
+                parentStyle,
+                "padding",
+                expectedPadding);
+            if (requireEncodedEntities)
+            {
+                string actualPadding;
+                bool hasPadding = parentStyle.TryGetValue("padding", out actualPadding);
+                Check(
+                    caseName + " item " + (index + 1) + " direct spacing syntax",
+                    hasPadding && string.Equals(expectedPadding, actualPadding, StringComparison.Ordinal),
+                    "expected '" + expectedPadding + "', got '" + (actualPadding ?? "<missing>") + "'");
+            }
+            StyleEquals(caseName + " item " + (index + 1) + " white space", parentStyle, "white-space", "nowrap");
+            StyleEquals(caseName + " item " + (index + 1) + " vertical alignment", parentStyle, "vertical-align", "middle");
+            Check(caseName + " item " + (index + 1) + " permission wrapper is unbordered", !parentStyle.ContainsKey("border"), permissionCell.GetAttribute("style"));
+
+            IElement nestedTable = SingleDirectChild(caseName + " item " + (index + 1) + " permission-group table", permissionCell, "table");
+            AssertPresentationTable(caseName + " permission-group table " + (index + 1), nestedTable);
+            IElement nestedBody = SingleDirectChild(caseName + " item " + (index + 1) + " permission-group tbody", nestedTable, "tbody");
+            IElement nestedRow = SingleDirectChild(caseName + " item " + (index + 1) + " permission-group row", nestedBody, "tr");
+            List<IElement> iconAndLabelCells = DirectChildren(nestedRow, "td");
+            Check(caseName + " item " + (index + 1) + " icon-wrapper and label cell count", iconAndLabelCells.Count == 2, "count=" + iconAndLabelCells.Count);
+            if (iconAndLabelCells.Count != 2)
+            {
+                continue;
+            }
+
+            IElement iconWrapperCell = iconAndLabelCells[0];
+            AttributeEquals(caseName + " icon wrapper " + (index + 1) + " width", iconWrapperCell, "width", "14");
+            AttributeEquals(caseName + " icon wrapper " + (index + 1) + " height", iconWrapperCell, "height", "14");
+            AttributeEquals(caseName + " icon wrapper " + (index + 1) + " valign", iconWrapperCell, "valign", "middle");
+            Dictionary<string, string> iconWrapperStyle = ParseStyle(iconWrapperCell);
+            StyleEquals(caseName + " icon wrapper " + (index + 1) + " CSS width", iconWrapperStyle, "width", "14px");
+            StyleEquals(caseName + " icon wrapper " + (index + 1) + " CSS height", iconWrapperStyle, "height", "14px");
+            StyleEquals(caseName + " icon wrapper " + (index + 1) + " padding", iconWrapperStyle, "padding", "0");
+            StyleEquals(caseName + " icon wrapper " + (index + 1) + " vertical alignment", iconWrapperStyle, "vertical-align", "middle");
+            Check(caseName + " icon wrapper " + (index + 1) + " is unbordered", !iconWrapperStyle.ContainsKey("border"), iconWrapperCell.GetAttribute("style"));
+
+            IElement iconTable = SingleDirectChild(caseName + " icon wrapper " + (index + 1) + " icon-only table", iconWrapperCell, "table");
+            AssertIconPresentationTable(caseName + " icon table " + (index + 1), iconTable);
+            IElement iconBody = SingleDirectChild(caseName + " icon table " + (index + 1) + " tbody", iconTable, "tbody");
+            IElement iconRow = SingleDirectChild(caseName + " icon table " + (index + 1) + " row", iconBody, "tr");
+            IElement iconCell = SingleDirectChild(caseName + " icon table " + (index + 1) + " bordered cell", iconRow, "td");
+            string expectedColor = enabledStates[index] ? "#0082c9" : "#c62828";
+            string expectedSymbol = enabledStates[index] ? "\u2713" : "\u2717";
+            AttributeEquals(caseName + " icon " + (index + 1) + " width", iconCell, "width", "14");
+            AttributeEquals(caseName + " icon " + (index + 1) + " height", iconCell, "height", "14");
+            AttributeEquals(caseName + " icon " + (index + 1) + " align", iconCell, "align", "center");
+            AttributeEquals(caseName + " icon " + (index + 1) + " valign", iconCell, "valign", "middle");
+            Dictionary<string, string> iconStyle = ParseStyle(iconCell);
+            StyleEquals(caseName + " icon " + (index + 1) + " CSS width", iconStyle, "width", "14px");
+            StyleEquals(caseName + " icon " + (index + 1) + " CSS height", iconStyle, "height", "14px");
+            StyleEquals(caseName + " icon " + (index + 1) + " border", iconStyle, "border", "1px solid " + expectedColor);
+            StyleEquals(caseName + " icon " + (index + 1) + " color", iconStyle, "color", expectedColor);
+            StyleEquals(caseName + " icon " + (index + 1) + " font size", iconStyle, "font-size", "11px");
+            StyleEquals(caseName + " icon " + (index + 1) + " font weight", iconStyle, "font-weight", "700");
+            StyleEquals(caseName + " icon " + (index + 1) + " line height", iconStyle, "line-height", "14px");
+            StyleEquals(caseName + " icon " + (index + 1) + " padding", iconStyle, "padding", "0");
+            Check(caseName + " icon " + (index + 1) + " omits MSO line-height rule", !iconStyle.ContainsKey("mso-line-height-rule"), iconCell.GetAttribute("style"));
+            StyleEquals(caseName + " icon " + (index + 1) + " text alignment", iconStyle, "text-align", "center");
+            StyleEquals(caseName + " icon " + (index + 1) + " vertical alignment", iconStyle, "vertical-align", "middle");
+            Check(caseName + " icon " + (index + 1) + " symbol", string.Equals(iconCell.TextContent.Trim(), expectedSymbol, StringComparison.Ordinal), iconCell.TextContent);
+
+            IElement labelCell = iconAndLabelCells[1];
+            AttributeEquals(caseName + " label " + (index + 1) + " nowrap", labelCell, "nowrap", "nowrap");
+            AttributeEquals(caseName + " label " + (index + 1) + " valign", labelCell, "valign", "middle");
+            Dictionary<string, string> labelStyle = ParseStyle(labelCell);
+            StyleEquals(caseName + " label " + (index + 1) + " spacing", labelStyle, "padding-left", "5px");
+            Check(caseName + " label " + (index + 1) + " avoids padding shorthand", !labelStyle.ContainsKey("padding"), labelCell.GetAttribute("style"));
+            StyleEquals(caseName + " label " + (index + 1) + " white space", labelStyle, "white-space", "nowrap");
+            StyleEquals(caseName + " label " + (index + 1) + " font weight", labelStyle, "font-weight", "600");
+            StyleEquals(caseName + " label " + (index + 1) + " vertical alignment", labelStyle, "vertical-align", "middle");
+            Check(caseName + " label " + (index + 1) + " inherits font family", !labelStyle.ContainsKey("font-family"), labelCell.GetAttribute("style"));
+            Check(caseName + " label " + (index + 1) + " inherits font size", !labelStyle.ContainsKey("font-size"), labelCell.GetAttribute("style"));
+            Check(caseName + " label " + (index + 1) + " localized text", string.Equals(labelCell.TextContent.Trim(), labels[index], StringComparison.Ordinal), labelCell.TextContent);
+        }
+    }
+
+    private static void TestPermissionsHtmlContract()
+    {
+        string[] defaultLabels = { "Read", "Upload", "Modify", "Delete" };
+        AssertPermissionsHtmlContract(
+            "Read-only Rights HTML",
+            BuildPermissionsHtml(FileLinkPermissionFlags.Read, defaultLabels),
+            defaultLabels,
+            new[] { true, false, false, false },
+            true);
+        AssertPermissionsHtmlContract(
+            "All-enabled Rights HTML",
+            BuildPermissionsHtml(FileLinkPermissionFlags.Read | FileLinkPermissionFlags.Create | FileLinkPermissionFlags.Write | FileLinkPermissionFlags.Delete, defaultLabels),
+            defaultLabels,
+            new[] { true, true, true, true },
+            true);
+        AssertPermissionsHtmlContract(
+            "All-disabled Rights HTML",
+            BuildPermissionsHtml(FileLinkPermissionFlags.None, defaultLabels),
+            defaultLabels,
+            new[] { false, false, false, false },
+            true);
+        AssertPermissionsHtmlContract(
+            "Mixed Rights HTML",
+            BuildPermissionsHtml(FileLinkPermissionFlags.Create | FileLinkPermissionFlags.Delete, defaultLabels),
+            defaultLabels,
+            new[] { false, true, false, true },
+            true);
+
+        string[] longLabels =
+        {
+            "Leseberechtigung f\u00fcr sehr lange \u00dcbersetzung",
+            "Hochladen und neue Dateien erstellen",
+            "Vorhandene Dokumente vollst\u00e4ndig bearbeiten",
+            "Freigegebene Inhalte dauerhaft l\u00f6schen"
+        };
+        AssertPermissionsHtmlContract(
+            "Long translated Rights HTML",
+            BuildPermissionsHtml(FileLinkPermissionFlags.Read | FileLinkPermissionFlags.Write, longLabels),
+            longLabels,
+            new[] { true, false, true, false },
+            true);
+
+        string[] escapedLabels = { "Read & <inspect>", "Upload", "Modify", "Delete" };
+        string escapedHtml = BuildPermissionsHtml(FileLinkPermissionFlags.Read | FileLinkPermissionFlags.Delete, escapedLabels);
+        AssertPermissionsHtmlContract(
+            "Escaped Rights HTML",
+            escapedHtml,
+            escapedLabels,
+            new[] { true, false, false, true },
+            true);
+        Check("Rights HTML escapes localized label markup", escapedHtml.Contains("Read &amp; &lt;inspect&gt;") && !escapedHtml.Contains("<inspect>"), escapedHtml);
+
+        BackendPolicyStatus policy = BuildCustomTemplatePolicy("{RIGHTS}");
+        FileLinkResult result = BuildResult("https://cloud.example.test/nc/s/AbCd1234", "AbCd1234", string.Empty);
+        string sanitizedHtml = FileLinkHtmlBuilder.Build(result, new FileLinkRequest(), "custom", policy);
+        AssertPermissionsHtmlContract(
+            "Sanitized custom-template Rights HTML",
+            sanitizedHtml,
+            defaultLabels,
+            new[] { true, true, false, false },
+            false);
+    }
+
     public static int Main()
     {
         Strings.SetPreferredUiLanguage("en");
+        TestPermissionsHtmlContract();
         TestNormalModeUsesNextcloudLinkWording();
         TestAttachmentModeKeepsNextcloudSubpath();
         TestPlainTextKeepsNextcloudSubpath();
@@ -219,10 +567,10 @@ internal static class OutlookFileLinkRenderingTests
 
         foreach (string output in new[] { html, plainText })
         {
-            Check("Backend template language localizes LINK_INTRO", output.Contains("Öffnen Sie den untenstehenden Nextcloud-Link"), output);
+            Check("Backend template language localizes LINK_INTRO", output.Contains("\u00d6ffnen Sie den untenstehenden Nextcloud-Link"), output);
             Check("Backend template language localizes LINK_LABEL", output.Contains("Nextcloud-Link"), output);
             Check("Backend template language localizes separate-password hint", output.Contains("Das Passwort wird in einer separaten E-Mail gesendet."), output);
-            Check("Backend template language localizes permission names", output.Contains("Lesen") && output.Contains("Hochladen") && output.Contains("Bearbeiten") && output.Contains("Löschen"), output);
+            Check("Backend template language localizes permission names", output.Contains("Lesen") && output.Contains("Hochladen") && output.Contains("Bearbeiten") && output.Contains("L\u00f6schen"), output);
         }
     }
 
