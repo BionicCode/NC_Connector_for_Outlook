@@ -466,7 +466,7 @@ namespace NcTalkOutlookAddIn.Utilities
                 values.Rights,
                 HttpUtility.HtmlEncode(values.Note),
                 HttpUtility.HtmlEncode(values.LinkIntro),
-                HttpUtility.HtmlEncode(values.LinkLabel));
+                HtmlNoBreakEncoder.EncodeFieldLabel(values.LinkLabel));
 
             string sanitized = HtmlTemplateSanitizer.SanitizeShareTemplateHtml(html);
             if (string.IsNullOrWhiteSpace(sanitized))
