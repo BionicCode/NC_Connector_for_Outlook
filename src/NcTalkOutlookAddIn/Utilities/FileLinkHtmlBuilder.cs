@@ -592,13 +592,13 @@ namespace NcTalkOutlookAddIn.Utilities
             string output = attachmentMode
                 ? StripTemplateRow(template, "RIGHTS")
                 : template;
-            output = output.Replace(HtmlTemplatePlaceholders.URL, url);
-            output = output.Replace(HtmlTemplatePlaceholders.PASSWORD, password);
-            output = output.Replace(HtmlTemplatePlaceholders.EXPIRATIONDATE, expirationDate);
-            output = output.Replace(HtmlTemplatePlaceholders.RIGHTS, rights);
-            output = output.Replace(HtmlTemplatePlaceholders.NOTE, note);
-            output = output.Replace(HtmlTemplatePlaceholders.LINK_INTRO, linkIntro);
-            output = output.Replace(HtmlTemplatePlaceholders.LINK_LABEL, linkLabel);
+            output = output.Replace("{URL}", url);
+            output = output.Replace("{PASSWORD}", password);
+            output = output.Replace("{EXPIRATIONDATE}", expirationDate);
+            output = output.Replace("{RIGHTS}", rights);
+            output = output.Replace("{NOTE}", note);
+            output = output.Replace("{LINK_INTRO}", linkIntro);
+            output = output.Replace("{LINK_LABEL}", linkLabel);
             return output;
         }
 
@@ -778,7 +778,7 @@ namespace NcTalkOutlookAddIn.Utilities
             builder.AppendFormat(
                 CultureInfo.InvariantCulture,
                 "<th style=\"text-align:left;width:12ch;vertical-align:top;padding:6px 10px 6px 0;\">{0}</th>",
-                HttpUtility.HtmlEncode(label));
+                encodedLabel);
             builder.Append("<td style=\"padding:6px 0;max-width:50ch;word-break:break-word;\">");
             builder.Append(valueHtml ?? string.Empty);
             builder.Append("</td>");
