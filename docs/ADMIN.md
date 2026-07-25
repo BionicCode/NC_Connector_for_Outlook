@@ -61,6 +61,8 @@ The Nextcloud Password Policy app is optional. When available, NC Connector read
 
 Clients need HTTPS access to the configured public Nextcloud base URL, including its OCS and WebDAV paths. Preserve a public subpath such as `/nextcloud`, but do not add `/index.php` to the URL configured in NC Connector.
 
+NC Connector rejects explicit HTTP URLs, credentials embedded in a URL, and base URLs with a query or fragment. Dynamic login and password-policy endpoints must resolve to HTTPS on the same host, port, and scheme as the configured Nextcloud base URL.
+
 Optional outbound destinations:
 
 - `https://nc-connector.de/wp-json/ncc/v1/update-check` for daily release metadata
@@ -191,6 +193,10 @@ If Outlook does not expose a profile name, the add-in uses:
 
 The app password is stored as `AppPasswordProtected` with Windows Data Protection for the current user. It is not a portable credential.
 
+Every successful settings save is written to a validated temporary file in the same directory and then replaces the primary file. The previous valid file remains as `settings_<OutlookProfile>.xml.bak`. If only the protected password is unreadable, NC Connector keeps the other settings, clears the password, and blocks automatic settings writes until the user explicitly saves a corrected configuration.
+
+Pending Talk room cleanup and IFB registry ownership are stored separately per Outlook profile below `%LOCALAPPDATA%\NC4OL\`. These state files use Windows Data Protection and keep a backup next to the primary file. Separate password follow-ups are complete messages saved in the user's Outlook Drafts folder; their private payload property is protected for the current Windows user. Do not copy protected state to another Windows account, and do not delete pending NC Connector password drafts.
+
 Older `settings.ini` files below these directories are migrated on first start and removed only after a successful migration:
 
 ```text
@@ -203,17 +209,18 @@ Older `settings.ini` files below these directories are migrated on first start a
 To back up a client profile:
 
 1. Close Outlook.
-2. Copy `settings_*.xml` from `%LOCALAPPDATA%\NC4OL\`.
-3. Record the Windows user and Outlook profile name.
+2. Copy `settings_*.xml` and `settings_*.xml.bak` from `%LOCALAPPDATA%\NC4OL\`.
+3. If pending Talk room cleanup must survive the backup, copy `talk-room-lifecycle-*.dat*` and `ifb-registry-state-*.dat*` too. They can be restored only for the same Windows user. Pending password follow-ups are part of the Outlook mailbox and are not restored from these files.
+4. Record the Windows user and Outlook profile name.
 
 To restore it:
 
 1. Close Outlook.
-2. Restore the matching profile file for the same Windows user.
+2. Restore the matching primary and backup files for the same Windows user.
 3. Start Outlook and run the connection test.
 4. If authentication fails, use the Nextcloud login flow again.
 
-Logs and the IFB address-book cache are operating data, not required for configuration recovery.
+Logs and the IFB address-book cache are operating data, not required for configuration recovery. Omitting the Talk lifecycle files abandons pending Talk-room reconciliation. Password follow-ups survive through their Outlook drafts when the mailbox itself is retained.
 
 ### Rollout and pre-seeding
 
@@ -541,23 +548,27 @@ Both attachment targets remain read-only shares. If a valid ZIP-download URL can
 
 Outlook or Exchange can reject a large attachment before an add-in event runs. In that case, users must select **Insert Nextcloud share** and add the file directly in the sharing wizard.
 
-### Cleanup after an unsent mail
+### Unsent mail and share cleanup
 
-An attachment share created for a compose window is tracked until the primary mail is sent successfully.
+Once a share block has been inserted successfully, the server share remains. Outlook does not provide a reliable signal that distinguishes an intentionally discarded compose window from delayed send, offline Outbox delivery, a custom Drafts/Outbox folder, or an inline reply moved into its own window. NC Connector therefore does not delete a successfully inserted share from a close or folder-absence assumption.
 
-- successful primary send: cleanup tracking is cleared and the share remains
-- compose window closed without successful send: the created server folder is deleted after a short send/close grace period
-- deletion failure: the mail remains closed, the failure is written to `FILELINK`, and an administrator may need to remove the orphaned share manually
+- If the user discards that message, remove the unused share manually in Nextcloud.
+- If the share block cannot be inserted, the wizard reports failure and immediately attempts to remove the newly created server folder with the captured account context.
+- An enforcing attachment policy blocks sending while a normal attachment that should have been routed through NC Connector remains in the message.
+- Separate password delivery is handled independently through saved Outlook drafts as described below.
 
 ### Separate password delivery
 
 Separate password delivery requires NC Connector Backend and an active seat.
 
 - The primary mail contains no plain password.
-- The follow-up starts only after Outlook confirms successful sending of the primary mail.
+- Before Outlook accepts the primary send, the complete password follow-up is saved as an Outlook draft. If that draft cannot be saved safely, the primary send is cancelled.
+- The follow-up starts only after Outlook positively confirms the primary mail in the exact Sent folder selected for that message.
+- Delayed send, offline Outbox items, and an Outlook restart keep the follow-up pending.
 - Automatic sending is attempted with the same effective sender.
-- If sender verification or automatic sending fails, Outlook opens a prepared draft for manual sending.
+- If sender verification or automatic sending fails, Outlook opens that same prepared draft for manual sending; it does not create a duplicate.
 - With the Secrets mode, one one-time Secret link is created per final recipient.
+- Equal SMTP addresses across To, Cc, and Bcc receive only one Secret follow-up.
 - If Secrets creation fails, Outlook uses the plain password follow-up and displays a warning.
 - A matching backend signature is included only when the follow-up sender matches the assigned signature address.
 
@@ -565,7 +576,9 @@ Separate password delivery requires NC Connector Backend and an active seat.
 
 Deleting a saved Outlook appointment removes its remote Talk room only when the setting is explicitly enabled and the appointment contains NC Connector room metadata. The setting is disabled by default. A Talk URL copied into a location or body is not sufficient for remote deletion.
 
-The cleanup of a newly created room from an unsaved, discarded appointment remains active.
+Tracked appointments and pending room deletions are recorded per Outlook profile. Outlook watches the mounted calendar stores and their calendar subfolders without retaining every appointment as an open COM object. Direct deletion, moving an appointment between watched folders, an Outlook restart, and temporary Nextcloud or store failures are covered by the same delayed reconciliation. A room is queued for remote deletion only after Outlook confirms that the tracked item no longer exists; a temporarily unavailable store keeps the record pending. The cleanup of a newly created room from an unsaved, discarded appointment remains active.
+
+Moderator delegation rejects the current Nextcloud user when the wizard input matches the canonical user ID, the configured login, or the known primary email address. A successful handoff to another user still causes the original moderator to leave the room.
 
 Before enabling saved-appointment room deletion across an organization:
 
@@ -584,13 +597,15 @@ IFB lets Outlook request Nextcloud free/busy data through a local HTTP endpoint.
 3. Enable IFB and select the number of days, cache duration, and local port. Defaults are 30 days, 24 cache hours, and port `7777`.
 4. Save and restart Outlook.
 
-Default listener:
+Reserved listener namespace:
 
 ```text
 http://127.0.0.1:7777/nc-ifb/
 ```
 
-The MSI reserves the default URL namespace for authenticated Windows users. Enabling IFB updates Outlook's per-user Free/Busy path. Disabling IFB restores the previously recorded path.
+The MSI reserves the default URL namespace for authenticated Windows users. NC Connector adds a profile-specific random path segment to Outlook's Free/Busy URL; requests without that segment return `404`. The secret path is managed internally and is intentionally not shown in this guide.
+
+Enabling IFB updates only Outlook's per-user Free/Busy values. Existing values and their types are recorded separately. Disabling IFB restores a value only while it still contains the value written by NC Connector; later administrator or application changes are left untouched. Values below `Software\Policies` are read for conflicts but are never written. The address-book cache is separated by Outlook profile, full Nextcloud base URL including any subpath, and canonical Nextcloud user ID.
 
 The listener runs only while Outlook is running, IFB is enabled, and the stored Nextcloud credentials are complete.
 
@@ -599,11 +614,9 @@ The listener runs only while Outlook is running, IFB is enabled, and the stored 
 ```powershell
 netsh http show urlacl | Select-String -Pattern "127.0.0.1:7777/nc-ifb"
 Test-NetConnection 127.0.0.1 -Port 7777
-$ifbAddress = [Uri]::EscapeDataString("pilot@example.com")
-Invoke-WebRequest "http://127.0.0.1:7777/nc-ifb/freebusy/${ifbAddress}.vfb" -UseBasicParsing
 ```
 
-Use an address that exists in the Nextcloud system address book. Expected result: the reservation exists, the TCP test succeeds, and the Free/Busy request returns calendar data or `204 No Content`.
+Then create a test meeting in Outlook, add an address from the Nextcloud system address book, and open **Scheduling Assistant**. Expected result: the reservation exists, the TCP test succeeds, and Outlook displays free/busy data. A direct request to the public `/nc-ifb/freebusy/...` path must return `404`.
 
 ### Custom IFB port
 
@@ -760,6 +773,16 @@ Do not work around a blocked final signature check by copying unknown HTML into 
 3. Test the generated address-book URL for the affected user.
 4. Restart Outlook and run the connection test.
 
+### Settings cannot be loaded or saved
+
+1. Close Outlook and copy `settings_*.xml` plus `settings_*.xml.bak` from `%LOCALAPPDATA%\NC4OL\` to a support directory.
+2. Start Outlook and check whether the values were recovered from the backup.
+3. If only the app password is empty, authenticate again; the other readable settings remain available.
+4. If both files are invalid, enter the settings again and use the explicit **Save** action. Background writes remain blocked until that save succeeds.
+5. If saving fails, check free disk space, access rights, endpoint-security blocks, and the `CORE` log entries. The dialog remains open and the active runtime configuration is not replaced.
+
+Expected result: a successful explicit save creates a valid primary file and preserves the previous valid version as `.bak`.
+
 ### IFB does not respond
 
 1. Confirm that IFB is enabled and credentials are complete.
@@ -772,7 +795,7 @@ netstat -ano | Select-String ":<ifb-port>"
 ```
 
 5. Run `Test-NetConnection 127.0.0.1 -Port <ifb-port>`.
-6. Request `http://127.0.0.1:<ifb-port>/nc-ifb/freebusy/<known-address>.vfb` with an address from the Nextcloud system address book.
-7. Review `IFB` log entries.
+6. Create a test meeting, add a known address from the Nextcloud system address book, and open **Scheduling Assistant**.
+7. Review `IFB` log entries for the Outlook request and the upstream CalDAV result. A direct request without the internally managed path segment returning `404` is expected.
 
 If a custom reservation has the wrong principal, delete it and recreate it with `D:(A;;GX;;;AU)`.

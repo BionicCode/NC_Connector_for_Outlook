@@ -95,7 +95,7 @@ namespace NcTalkOutlookAddIn.Utilities
         private static readonly object InitLock = new object();
         private static bool _initialized;
         private static string _preferredUiLanguageCode;
-        private static string[] _languageCandidates = new[] { EnglishLanguageCode, DefaultLanguageCode };
+        private static string[] _languageCandidates = new[] { DefaultLanguageCode, EnglishLanguageCode };
 
         private static readonly object TranslationLock = new object();
         private static readonly Dictionary<string, Dictionary<string, string>> TranslationCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
@@ -141,10 +141,17 @@ namespace NcTalkOutlookAddIn.Utilities
             TryAddCulture(list, () => CultureInfo.CurrentCulture);
             TryAddCulture(list, () => CultureInfo.InstalledUICulture);
 
-            AddLanguageCandidate(list, EnglishLanguageCode);
             AddLanguageCandidate(list, DefaultLanguageCode);
+            AddLanguageCandidate(list, EnglishLanguageCode);
 
             return list.ToArray();
+        }
+
+        private static bool UsesGermanAdminGuide()
+        {
+            EnsureInitialized();
+            return _languageCandidates.Length > 0
+                   && string.Equals(_languageCandidates[0], DefaultLanguageCode, StringComparison.OrdinalIgnoreCase);
         }
 
         internal static void SetPreferredUiLanguage(string languageCode)
@@ -422,7 +429,7 @@ namespace NcTalkOutlookAddIn.Utilities
                 {
                     return Get(key, defaultValue);
                 }
-                foreach (string code in new[] { normalized, EnglishLanguageCode, DefaultLanguageCode })
+                foreach (string code in new[] { normalized, DefaultLanguageCode, EnglishLanguageCode })
                 {
                     Dictionary<string, string> dictionary = GetTranslationsForLanguage(code);
                     if (dictionary == null)
@@ -571,7 +578,9 @@ namespace NcTalkOutlookAddIn.Utilities
         {
             get
             {
-                return "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.md#system-address-book";
+                return UsesGermanAdminGuide()
+                    ? "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.de.md#systemadressbuch"
+                    : "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.md#system-address-book";
             }
         }
         internal static string PolicyWarningTitle { get { return Get("policy_warning_title", "Backend policy is currently unavailable."); } }
@@ -584,7 +593,9 @@ namespace NcTalkOutlookAddIn.Utilities
         {
             get
             {
-                return "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.md";
+                return UsesGermanAdminGuide()
+                    ? "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.de.md"
+                    : "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.md";
             }
         }
         internal static string TalkVersionUnknown { get { return Get("outlook_version_unknown", "unknown"); } }
