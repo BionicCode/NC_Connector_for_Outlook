@@ -31,8 +31,9 @@ try {
     $addressBookPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\IfbAddressBookCache.cs"
     $freeBusyPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\FreeBusyServer.cs"
     $appointmentPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Controllers\TalkAppointmentController.cs"
+    $appointmentSyncPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Controllers\TalkAppointmentController.Sync.cs"
     $httpClientPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\NcHttpClient.cs"
-    foreach ($path in @($identityServicePath, $fileLinkServicePath, $addressBookPath, $freeBusyPath, $appointmentPath, $httpClientPath)) {
+    foreach ($path in @($identityServicePath, $fileLinkServicePath, $addressBookPath, $freeBusyPath, $appointmentPath, $appointmentSyncPath, $httpClientPath)) {
         Assert-Check (Test-Path -LiteralPath $path) ("Identity contract source exists: " + (Split-Path -Leaf $path))
     }
 
@@ -40,7 +41,9 @@ try {
     $fileLinkSource = Get-Content -Raw -LiteralPath $fileLinkServicePath
     $addressBookSource = Get-Content -Raw -LiteralPath $addressBookPath
     $freeBusySource = Get-Content -Raw -LiteralPath $freeBusyPath
-    $appointmentSource = Get-Content -Raw -LiteralPath $appointmentPath
+    $appointmentSource = (Get-Content -Raw -LiteralPath $appointmentPath) +
+        [Environment]::NewLine +
+        (Get-Content -Raw -LiteralPath $appointmentSyncPath)
     $httpClientSource = Get-Content -Raw -LiteralPath $httpClientPath
 
     Assert-Check ($identitySource.Contains('/ocs/v2.php/cloud/user?format=json')) "Canonical UID resolver uses the documented current-user endpoint"
@@ -49,7 +52,7 @@ try {
     Assert-Check (-not $fileLinkSource.Contains('string username = _configuration.Username')) "FileLink does not use the authentication login as DAV UID"
     Assert-Check ([regex]::IsMatch($addressBookSource, 'NextcloudUserIdentityService\.ResolveCurrentUserId\(\s*configuration\s*\)')) "CardDAV resolves the canonical UID"
     Assert-Check ($freeBusySource.Contains('NextcloudUserIdentityService.ResolveCurrentUserId(_configuration)')) "CalDAV resolves the canonical UID"
-    Assert-Check ($appointmentSource.Contains('NextcloudUserIdentityService.ResolveCurrentUserId(configuration)')) "Appointment address-book lookup resolves the canonical UID"
+    Assert-Check ([regex]::IsMatch($appointmentSource, 'NextcloudUserIdentityService\.ResolveCurrentUserId\(\s*(?:configuration|snapshot\.Configuration)\s*\)')) "Appointment address-book lookup resolves the canonical UID"
     Assert-Check ($httpClientSource.Contains('_username = configuration.Username')) "Basic Auth still uses the configured login"
 
     $testSource = Join-Path $TempRoot "NextcloudUserIdContractTests.cs"

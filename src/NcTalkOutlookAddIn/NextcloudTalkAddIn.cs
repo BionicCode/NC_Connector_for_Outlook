@@ -695,33 +695,6 @@ namespace NcTalkOutlookAddIn
             return localEnabled;
         }
 
-        internal void QueueSavedEventRoomDeletion(string roomToken, bool isEventConversation)
-        {
-            if (string.IsNullOrWhiteSpace(roomToken))
-            {
-                return;
-            }
-
-            string normalizedRoomToken = roomToken.Trim();
-            Task.Run(() =>
-            {
-                try
-                {
-                    if (!ShouldDeleteTalkRoomOnSavedEventDelete())
-                    {
-                        LogTalk("Saved-event room deletion skipped (opt-in disabled, token=" + normalizedRoomToken + ").");
-                        return;
-                    }
-
-                    TryDeleteRoom(normalizedRoomToken, isEventConversation, false);
-                }
-                catch (Exception ex)
-                {
-                    DiagnosticsLogger.LogException(LogCategories.Talk, "Saved-event room deletion failed in background (token=" + normalizedRoomToken + ").", ex);
-                }
-            });
-        }
-
         private void RefreshEntryBinding(AppointmentSubscription subscription)
         {
             if (subscription == null)
@@ -755,6 +728,10 @@ namespace NcTalkOutlookAddIn
                 }
 
                 _subscriptionByEntryId[newEntryId] = subscription;
+                TrackTalkRoomAppointment(
+                    subscription.Appointment,
+                    subscription.RoomToken,
+                    subscription.IsEventConversation);
             }
         }
 
@@ -843,6 +820,10 @@ namespace NcTalkOutlookAddIn
             if (!string.IsNullOrEmpty(entryId))
             {
                 _subscriptionByEntryId[entryId] = subscription;
+                TrackTalkRoomAppointment(
+                    appointment,
+                    normalizedRoomToken,
+                    isEventConversation);
             }
         }
 

@@ -77,7 +77,11 @@ namespace NcTalkOutlookAddIn.Controllers
             BackendPolicyStatus policyStatus = policyStatusTask.Result;
             PasswordPolicyInfo passwordPolicy = passwordPolicyTask.Result;
 
-            var addressbookCache = new IfbAddressBookCache(_owner.SettingsStorage != null ? _owner.SettingsStorage.DataDirectory : null);
+            var addressbookCache = new IfbAddressBookCache(
+                _owner.SettingsStorage != null
+                    ? _owner.SettingsStorage.DataDirectory
+                    : null,
+                _owner.OutlookProfileScope);
             NextcloudTalkAddIn.LogTalkMessage("System address book status check requested (context=talk_click, forceRefresh=True).");
             var talkClickAddressbookStatus = await Task.Run(() => addressbookCache.GetSystemAddressbookStatus(
                 configuration,
@@ -104,7 +108,6 @@ namespace NcTalkOutlookAddIn.Controllers
                 NextcloudTalkAddIn.LogTalkMessage("System address book could not be loaded: " + ex.Message);
                 userDirectory = new List<NextcloudUser>();
             }
-
             await _owner.RunOnOutlookUiThreadAsync(
                 () => RunTalkDialogOnUiThread(
                     appointment,

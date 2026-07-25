@@ -3,7 +3,6 @@
 // See LICENSE.txt for details.
 
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Net;
 using NcTalkOutlookAddIn.Models;
@@ -13,7 +12,7 @@ using Outlook = Microsoft.Office.Interop.Outlook;
 
 namespace NcTalkOutlookAddIn.Controllers
 {
-    internal sealed class TalkAppointmentController
+    internal sealed partial class TalkAppointmentController
     {
         private readonly NextcloudTalkAddIn _owner;
 
@@ -118,38 +117,27 @@ namespace NcTalkOutlookAddIn.Controllers
             NextcloudTalkAddIn.LogTalkMessage("X-NCTALK fields updated (token set, lobby=" + request.LobbyEnabled + ", search=" + request.SearchVisible + ").");
 
             _owner.RegisterSubscription(appointment, result);
-            TryUpdateRoomDescription(appointment, result.RoomToken, result.CreatedAsEventConversation);
-        }
-
-        internal bool TryReadAppointmentStartEpoch(Outlook.AppointmentItem appointment, string roomToken, out long startEpoch)
-        {
-            startEpoch = 0;
-            if (appointment == null)
+            TalkAppointmentSyncSnapshot descriptionSnapshot =
+                CaptureRemoteSyncSnapshot(
+                    appointment,
+                    result.RoomToken,
+                    result.RoomUrl,
+                    request.LobbyEnabled,
+                    result.CreatedAsEventConversation,
+                    null,
+                    false);
+            if (descriptionSnapshot != null)
             {
-                NextcloudTalkAddIn.LogTalkMessage("Failed to read appointment start: appointment is null (token=" + (roomToken ?? "n/a") + ").");
-                return false;
+                descriptionSnapshot.RoomName = string.Empty;
+                descriptionSnapshot.UpdateLobby = false;
+                descriptionSnapshot.AddUsers = false;
+                descriptionSnapshot.AddGuests = false;
+                descriptionSnapshot.AttendeeEmails.Clear();
+                descriptionSnapshot.DelegationPending = false;
+                descriptionSnapshot.DelegateUserId = string.Empty;
+                _owner.QueueTalkAppointmentSync(
+                    descriptionSnapshot);
             }
-
-            DateTime start;
-            try
-            {
-                start = appointment.Start;
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLogger.LogException(LogCategories.Talk, "Failed to read Appointment.Start (token=" + (roomToken ?? "n/a") + ").", ex);
-                return false;
-            }
-
-            long? epoch = TimeUtilities.ToUnixTimeSeconds(start);
-            if (!epoch.HasValue || epoch.Value <= 0)
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Failed to read appointment start: Appointment.Start is missing/invalid (token=" + (roomToken ?? "n/a") + ", start=" + start.ToString("o", CultureInfo.InvariantCulture) + ").");
-                return false;
-            }
-
-            startEpoch = epoch.Value;
-            return true;
         }
 
         internal bool PersistCoreIcalProperties(
@@ -297,375 +285,6 @@ namespace NcTalkOutlookAddIn.Controllers
                 return false;
             }
             return !string.IsNullOrWhiteSpace(delegateId);
-        }
-
-        internal bool TrySyncRoomParticipants(Outlook.AppointmentItem appointment, string roomToken, bool isEventConversation)
-        {
-            if (appointment == null || string.IsNullOrWhiteSpace(roomToken) || _owner.CurrentSettings == null)
-            {
-                return false;
-            }
-            string delegateId;
-            if (IsDelegatedToOtherUser(appointment, out delegateId))
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Participant sync skipped (delegation=" + delegateId + ", token=" + roomToken + ").");
-                return true;
-            }
-            bool hasAddUsers = HasUserProperty(appointment, NextcloudTalkAddIn.IcalAddUsers);
-            bool hasAddGuests = HasUserProperty(appointment, NextcloudTalkAddIn.IcalAddGuests);
-
-            bool addUsers = hasAddUsers && GetUserPropertyBool(appointment, NextcloudTalkAddIn.IcalAddUsers);
-            bool addGuests = hasAddGuests && GetUserPropertyBool(appointment, NextcloudTalkAddIn.IcalAddGuests);
-            if (!addUsers && !addGuests)
-            {
-                return true;
-            }
-            var configuration = new TalkServiceConfiguration(_owner.CurrentSettings.ServerUrl, _owner.CurrentSettings.Username, _owner.CurrentSettings.AppPassword);
-            if (!configuration.IsComplete())
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Participant sync failed: talk service configuration incomplete.");
-                return false;
-            }
-
-            List<string> attendeeEmails = NextcloudTalkAddIn.GetAppointmentAttendeeEmails(appointment);
-            if (attendeeEmails.Count == 0)
-            {
-                return true;
-            }
-            var cache = new IfbAddressBookCache(_owner.SettingsStorage != null ? _owner.SettingsStorage.DataDirectory : null);
-            string selfEmail;
-            string currentUserId = NextcloudUserIdentityService.ResolveCurrentUserId(configuration);
-            cache.TryGetPrimaryEmailForUid(configuration, _owner.CurrentSettings.IfbCacheHours, currentUserId, out selfEmail);
-
-            int userAdds = 0;
-            int guestAdds = 0;
-            int skipped = 0;
-            bool hadFailures = false;
-
-            try
-            {
-                var service = _owner.CreateTalkService();
-                for (int i = 0; i < attendeeEmails.Count; i++)
-                {
-                    string email = attendeeEmails[i];
-                    if (string.IsNullOrWhiteSpace(email))
-                    {
-                        continue;
-                    }
-                    if (!string.IsNullOrWhiteSpace(selfEmail)
-                        && string.Equals(email, selfEmail, StringComparison.OrdinalIgnoreCase))
-                    {
-                        skipped++;
-                        continue;
-                    }
-                    string uid;
-                    if (cache.TryGetUid(configuration, _owner.CurrentSettings.IfbCacheHours, email, out uid)
-                        && !string.IsNullOrWhiteSpace(uid))
-                    {
-                        if (!addUsers)
-                        {
-                            skipped++;
-                            continue;
-                        }
-                        if (service.AddUserParticipant(roomToken, uid))
-                        {
-                            userAdds++;
-                        }
-                        else
-                        {
-                            hadFailures = true;
-                            NextcloudTalkAddIn.LogTalkMessage("Participant sync failed while adding Nextcloud user (uid=" + uid + ", token=" + roomToken + ").");
-                        }
-
-                        continue;
-                    }
-                    if (!addGuests)
-                    {
-                        skipped++;
-                        continue;
-                    }
-                    if (service.AddGuestParticipant(roomToken, email))
-                    {
-                        guestAdds++;
-                    }
-                    else
-                    {
-                        hadFailures = true;
-                        NextcloudTalkAddIn.LogTalkMessage("Participant sync failed while adding guest (email=" + email + ", token=" + roomToken + ").");
-                    }
-                }
-            }
-            catch (TalkServiceException ex)
-            {
-                hadFailures = true;
-                NextcloudTalkAddIn.LogTalkMessage("Participant sync failed: " + ex.Message);
-            }
-            catch (Exception ex)
-            {
-                hadFailures = true;
-                NextcloudTalkAddIn.LogTalkMessage("Unexpected error during participant sync: " + ex.Message);
-            }
-
-            NextcloudTalkAddIn.LogTalkMessage("Participant sync completed (users=" + userAdds + ", guests=" + guestAdds + ", skipped=" + skipped + ", failed=" + hadFailures + ", token=" + roomToken + ").");
-            return !hadFailures;
-        }
-
-        internal void TryApplyDelegation(Outlook.AppointmentItem appointment, string roomToken)
-        {
-            if (appointment == null || string.IsNullOrWhiteSpace(roomToken) || _owner.CurrentSettings == null)
-            {
-                return;
-            }
-            string delegateId;
-            if (!IsDelegationPending(appointment, out delegateId))
-            {
-                return;
-            }
-            string currentUser = _owner.CurrentSettings.Username ?? string.Empty;
-            if (!string.IsNullOrEmpty(currentUser)
-                && string.Equals(delegateId, currentUser, StringComparison.OrdinalIgnoreCase))
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Delegation ignored (delegate == current user).");
-                RemoveUserProperty(appointment, NextcloudTalkAddIn.IcalDelegate);
-                RemoveUserProperty(appointment, NextcloudTalkAddIn.IcalDelegateName);
-                RemoveUserProperty(appointment, NextcloudTalkAddIn.IcalDelegated);
-                RemoveUserProperty(appointment, NextcloudTalkAddIn.IcalDelegateReady);
-                return;
-            }
-            try
-            {
-                var service = _owner.CreateTalkService();
-                NextcloudTalkAddIn.LogTalkMessage("Starting delegation (token=" + roomToken + ", delegate=" + delegateId + ").");
-
-                service.AddUserParticipant(roomToken, delegateId);
-
-                List<TalkParticipant> participants = service.GetParticipants(roomToken);
-                int attendeeId = 0;
-                for (int i = 0; i < participants.Count; i++)
-                {
-                    TalkParticipant participant = participants[i];
-                    if (participant == null)
-                    {
-                        continue;
-                    }
-                    if (string.Equals(participant.ActorType, "users", StringComparison.OrdinalIgnoreCase)
-                        && string.Equals(participant.ActorId, delegateId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        attendeeId = participant.AttendeeId;
-                        break;
-                    }
-                }
-                if (attendeeId <= 0)
-                {
-                    NextcloudTalkAddIn.LogTalkMessage("Delegation failed: attendeeId not found (delegate=" + delegateId + ").");
-                    return;
-                }
-                string promoteError;
-                if (!service.PromoteModerator(roomToken, attendeeId, out promoteError))
-                {
-                    NextcloudTalkAddIn.LogTalkMessage("Delegation failed: moderator could not be assigned (" + promoteError + ").");
-                    string warning = string.IsNullOrWhiteSpace(promoteError)
-                        ? Strings.WarningModeratorTransferFailed
-                        : string.Format(Strings.WarningModeratorTransferFailedWithReasonFormat, promoteError);
-                    NextcloudTalkAddIn.ShowWarningDialog(warning);
-                    return;
-                }
-                bool left = service.LeaveRoom(roomToken);
-                NextcloudTalkAddIn.LogTalkMessage("Delegation completed (token=" + roomToken + ", delegate=" + delegateId + ", leftSelf=" + left + ").");
-
-                SetUserProperty(appointment, NextcloudTalkAddIn.IcalDelegated, Outlook.OlUserPropertyType.olText, "TRUE");
-                RemoveUserProperty(appointment, NextcloudTalkAddIn.IcalDelegateReady);
-            }
-            catch (TalkServiceException ex)
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Delegation failed: " + ex.Message);
-                string message = ex.Message;
-                NextcloudTalkAddIn.ShowWarningDialog(string.IsNullOrWhiteSpace(message)
-                    ? Strings.WarningModeratorTransferFailed
-                    : string.Format(Strings.WarningModeratorTransferFailedWithReasonFormat, message));
-            }
-            catch (Exception ex)
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Unexpected error during delegation: " + ex.Message);
-                string message = ex.Message;
-                NextcloudTalkAddIn.ShowWarningDialog(string.IsNullOrWhiteSpace(message)
-                    ? Strings.WarningModeratorTransferFailed
-                    : string.Format(Strings.WarningModeratorTransferFailedWithReasonFormat, message));
-            }
-        }
-
-        internal bool TryUpdateLobby(Outlook.AppointmentItem appointment, string roomToken, bool isEventConversation, long startEpoch)
-        {
-            if (appointment == null || string.IsNullOrWhiteSpace(roomToken))
-            {
-                return false;
-            }
-            string delegateId;
-            if (IsDelegatedToOtherUser(appointment, out delegateId))
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Lobby update skipped (delegation=" + delegateId + ", token=" + roomToken + ").");
-                return true;
-            }
-            try
-            {
-                var service = _owner.CreateTalkService();
-                DateTime startUtc;
-                try
-                {
-                    startUtc = DateTimeOffset.FromUnixTimeSeconds(startEpoch).UtcDateTime;
-                }
-                catch (ArgumentOutOfRangeException ex)
-                {
-                    DiagnosticsLogger.LogException(LogCategories.Talk, "Lobby update blocked: X-NCTALK-START out of range (token=" + roomToken + ", startEpoch=" + startEpoch.ToString(CultureInfo.InvariantCulture) + ").", ex);
-                    return false;
-                }
-
-                DateTime end;
-                try
-                {
-                    end = appointment.End;
-                }
-                catch (Exception ex)
-                {
-                    DiagnosticsLogger.LogException(LogCategories.Talk, "Failed to read Appointment.End during lobby update (token=" + roomToken + ").", ex);
-                    return false;
-                }
-                if (end == DateTime.MinValue)
-                {
-                    end = startUtc;
-                }
-
-                NextcloudTalkAddIn.LogTalkMessage("Updating lobby (token=" + roomToken + ", startEpoch=" + startEpoch.ToString(CultureInfo.InvariantCulture) + ", startUtc=" + startUtc.ToString("o") + ", end=" + end.ToString("o") + ", event=" + isEventConversation + ").");
-                service.UpdateLobby(roomToken, startUtc, end, isEventConversation);
-                NextcloudTalkAddIn.LogTalkMessage("Lobby updated successfully (token=" + roomToken + ").");
-                return true;
-            }
-            catch (TalkServiceException ex)
-            {
-                if (IsMissingOrForbiddenRoomMutationError(ex))
-                {
-                    NextcloudTalkAddIn.LogTalkMessage("Lobby update skipped after access loss (token=" + roomToken + ", status=" + (int)ex.StatusCode + ").");
-                    return true;
-                }
-
-                NextcloudTalkAddIn.LogTalkMessage("Lobby could not be updated: " + ex.Message);
-                NextcloudTalkAddIn.ShowWarningDialog(string.Format(Strings.WarningLobbyUpdateFailed, ex.Message));
-            }
-            catch (Exception ex)
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Unexpected error while updating lobby: " + ex.Message);
-                NextcloudTalkAddIn.ShowWarningDialog(string.Format(Strings.WarningLobbyUpdateFailed, ex.Message));
-            }
-            return false;
-        }
-
-        internal bool TryUpdateRoomName(Outlook.AppointmentItem appointment, string roomToken, bool isEventConversation)
-        {
-            if (appointment == null || string.IsNullOrWhiteSpace(roomToken))
-            {
-                return false;
-            }
-            if (isEventConversation)
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Room name update skipped for event conversation before request (token=" + roomToken + ").");
-                return true;
-            }
-            string delegateId;
-            if (IsDelegatedToOtherUser(appointment, out delegateId))
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Room name update skipped (delegation=" + delegateId + ", token=" + roomToken + ").");
-                return true;
-            }
-            string roomName = GetNormalizedRoomName(appointment);
-            if (string.IsNullOrWhiteSpace(roomName))
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Room name update skipped (empty subject, token=" + roomToken + ").");
-                return true;
-            }
-            try
-            {
-                var service = _owner.CreateTalkService();
-                NextcloudTalkAddIn.LogTalkMessage("Updating room name (token=" + roomToken + ", length=" + roomName.Length + ").");
-                service.UpdateRoomName(roomToken, roomName);
-                NextcloudTalkAddIn.LogTalkMessage("Room name updated (token=" + roomToken + ").");
-                return true;
-            }
-            catch (TalkServiceException ex)
-            {
-                if (IsEventConversationDescriptionError(ex))
-                {
-                    NextcloudTalkAddIn.LogTalkMessage("Room name update skipped for event conversation (token=" + roomToken + ").");
-                    PersistEventConversationTraits(appointment, roomToken);
-                    return true;
-                }
-                if (IsMissingOrForbiddenRoomMutationError(ex))
-                {
-                    NextcloudTalkAddIn.LogTalkMessage("Room name update skipped after access loss (token=" + roomToken + ", status=" + (int)ex.StatusCode + ").");
-                    return true;
-                }
-
-                NextcloudTalkAddIn.LogTalkMessage("Room name could not be updated: " + ex.Message);
-            }
-            catch (Exception ex)
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Unexpected error while updating room name: " + ex.Message);
-            }
-            return false;
-        }
-
-        internal bool TryUpdateRoomDescription(Outlook.AppointmentItem appointment, string roomToken, bool isEventConversation)
-        {
-            if (string.IsNullOrWhiteSpace(roomToken))
-            {
-                return false;
-            }
-            if (isEventConversation)
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Room description update skipped for event conversation before request (token=" + roomToken + ").");
-                return true;
-            }
-            string delegateId;
-            if (IsDelegatedToOtherUser(appointment, out delegateId))
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Description update skipped (delegation=" + delegateId + ", token=" + roomToken + ").");
-                return true;
-            }
-            string description = BuildDescriptionPayload(appointment);
-            if (description == null)
-            {
-                description = string.Empty;
-            }
-            try
-            {
-                var service = _owner.CreateTalkService();
-                NextcloudTalkAddIn.LogTalkMessage("Updating room description (token=" + roomToken + ", event=" + isEventConversation + ", textLength=" + description.Length + ").");
-                service.UpdateDescription(roomToken, description);
-                NextcloudTalkAddIn.LogTalkMessage("Room description updated (token=" + roomToken + ").");
-                return true;
-            }
-            catch (TalkServiceException ex)
-            {
-                if (IsEventConversationDescriptionError(ex))
-                {
-                    NextcloudTalkAddIn.LogTalkMessage("Room description update skipped after event-conversation response (token=" + roomToken + ").");
-                    PersistEventConversationTraits(appointment, roomToken);
-                    return true;
-                }
-                if (IsMissingOrForbiddenRoomMutationError(ex))
-                {
-                    NextcloudTalkAddIn.LogTalkMessage("Room description update skipped after access loss (token=" + roomToken + ", status=" + (int)ex.StatusCode + ").");
-                    return true;
-                }
-
-                NextcloudTalkAddIn.LogTalkMessage("Room description could not be updated: " + ex.Message);
-                NextcloudTalkAddIn.ShowWarningDialog(string.Format(Strings.WarningDescriptionUpdateFailed, ex.Message));
-            }
-            catch (Exception ex)
-            {
-                NextcloudTalkAddIn.LogTalkMessage("Unexpected error while updating room description: " + ex.Message);
-                NextcloudTalkAddIn.ShowWarningDialog(string.Format(Strings.WarningDescriptionUpdateFailed, ex.Message));
-            }
-            return false;
         }
 
         private static string BuildDescriptionPayload(Outlook.AppointmentItem appointment)

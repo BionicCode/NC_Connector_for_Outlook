@@ -45,8 +45,13 @@ namespace NcTalkOutlookAddIn
                 _settingsStorage.DataDirectory,
                 outlookProfileName);
             _freeBusyManager.Initialize(_outlookApplication);
+            InitializeTalkAppointmentSync(outlookProfileName);
+            InitializeTalkRoomLifecycle(
+                _settingsStorage.DataDirectory,
+                outlookProfileName);
             EnsureApplicationHook();
             EnsureInspectorHook();
+            StartTalkRoomLifecycleRecovery();
             ApplyIfbSettings();
             StartUpdateCheckIfDue();
         }
@@ -266,6 +271,8 @@ namespace NcTalkOutlookAddIn
             UnhookApplication();
             UnhookInspector();
             UnhookMailComposeSubscriptions();
+            DisposeTalkAppointmentSync();
+            DisposeTalkRoomLifecycle();
             if (_freeBusyManager != null && _currentSettings != null && _currentSettings.IfbEnabled)
             {
                 try
