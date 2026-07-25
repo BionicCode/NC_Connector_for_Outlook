@@ -7,13 +7,25 @@ $ProjectRoot = (Resolve-Path $ProjectRoot).Path
 $SourceRoot = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn"
 $SignaturePath = Join-Path $SourceRoot "NextcloudTalkAddIn.MailComposeSubscription.Signature.cs"
 $SendPath = Join-Path $SourceRoot "NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs"
+$ComposeSubscriptionPath = Join-Path $SourceRoot "NextcloudTalkAddIn.MailComposeSubscription.cs"
 $InteropPath = Join-Path $SourceRoot "Controllers\MailInteropController.cs"
-$ComposeShareLifecyclePath = Join-Path $SourceRoot "Controllers\ComposeShareLifecycleController.cs"
+$PasswordDispatchPath = Join-Path $SourceRoot "Controllers\ComposeShareLifecycleController.cs"
+$PendingPasswordDraftPath = Join-Path $SourceRoot "Controllers\PendingPasswordDraftController.cs"
 $PolicyPath = Join-Path $SourceRoot "NextcloudTalkAddIn.PolicyTemplates.cs"
 $SignatureContentPath = Join-Path $SourceRoot "Utilities\HtmlToPlainTextConverter.cs"
 $SignaturePlacementPath = Join-Path $SourceRoot "Utilities\EmailSignatureSlotPlacementPolicy.cs"
 
-foreach ($requiredPath in @($SignaturePath, $SendPath, $InteropPath, $ComposeShareLifecyclePath, $PolicyPath, $SignatureContentPath, $SignaturePlacementPath)) {
+foreach ($requiredPath in @(
+    $SignaturePath,
+    $SendPath,
+    $ComposeSubscriptionPath,
+    $InteropPath,
+    $PasswordDispatchPath,
+    $PendingPasswordDraftPath,
+    $PolicyPath,
+    $SignatureContentPath,
+    $SignaturePlacementPath
+)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "Required email-signature source file not found: $requiredPath"
     }
@@ -21,8 +33,10 @@ foreach ($requiredPath in @($SignaturePath, $SendPath, $InteropPath, $ComposeSha
 
 $SignatureSource = Get-Content -Raw -LiteralPath $SignaturePath
 $SendSource = Get-Content -Raw -LiteralPath $SendPath
+$ComposeSubscriptionSource = Get-Content -Raw -LiteralPath $ComposeSubscriptionPath
 $InteropSource = Get-Content -Raw -LiteralPath $InteropPath
-$ComposeShareLifecycleSource = Get-Content -Raw -LiteralPath $ComposeShareLifecyclePath
+$PasswordDispatchSource = Get-Content -Raw -LiteralPath $PasswordDispatchPath
+$PendingPasswordDraftSource = Get-Content -Raw -LiteralPath $PendingPasswordDraftPath
 $PolicySource = Get-Content -Raw -LiteralPath $PolicyPath
 $SignatureContentSource = Get-Content -Raw -LiteralPath $SignatureContentPath
 $SignaturePlacementSource = Get-Content -Raw -LiteralPath $SignaturePlacementPath
@@ -92,7 +106,7 @@ function Get-CSharpMethodBlock {
     $escapedName = [regex]::Escape($MethodName)
     $definition = [regex]::Match(
         $Text,
-        "(?m)^[ \t]*(?:private|internal|public)[ \t]+(?:static[ \t]+)?(?:async[ \t]+)?[A-Za-z0-9_<>,\.\[\]\?]+[ \t]+$escapedName[ \t]*\(")
+        "(?m)^[ \t]*(?:private|internal|public)[ \t]+(?:static[ \t]+)?(?:async[ \t]+)?[A-Za-z0-9_<>,\.\[\]\?]+[ \t\r\n]+$escapedName[ \t]*\(")
     if (-not $definition.Success) {
         return $null
     }
@@ -335,29 +349,49 @@ if ($null -eq $htmlShareInsert) {
     Require-Order $htmlShareInsert 'TryInsertHtmlIntoInspectorWordEditor' 'TryInsertHtmlIntoMailBody' 'Inspector HTML sharing rewrites HTMLBody before attempting bookmark-preserving WordEditor insertion.'
 }
 
-# Separate password follow-up mail uses only a successful cached policy snapshot
-# and applies a sender-matching managed signature before automatic send.
-$passwordSignatureSnapshot = Get-CSharpMethodBlock $ComposeShareLifecycleSource 'BuildSeparatePasswordSignatureSnapshot'
-if ($null -eq $passwordSignatureSnapshot) {
+# Separate password follow-up mail captures the share-time policy snapshot and
+# applies a sender-matching managed signature to the durable Outlook draft.
+$passwordSignatureCapture = Get-CSharpMethodBlock $PasswordDispatchSource 'BuildSeparatePasswordSignatureSnapshot'
+if ($null -eq $passwordSignatureCapture) {
     Add-Failure 'BuildSeparatePasswordSignatureSnapshot could not be parsed.'
 } else {
-    Require-Pattern $passwordSignatureSnapshot '\bTryGetCachedEmailSignaturePolicyStatus\(\s*configuration\s*,\s*out\s+policyStatus\s*\)' 'Separate password signature does not use the cached backend-policy snapshot.'
-    Require-Pattern $passwordSignatureSnapshot 'policyStatus\s*==\s*null\s*\|\|\s*!policyStatus\.FetchSucceeded' 'Separate password signature accepts an unsuccessful backend-policy snapshot.'
-    Require-Order $passwordSignatureSnapshot 'policyStatus.FetchSucceeded' 'snapshot.Active = true' 'Separate password signature is activated before the cached policy snapshot is verified.'
-    Require-Pattern $passwordSignatureSnapshot 'EmailSignatureContentBuilder\.BuildPlainText\(\s*sanitized\s*\)' 'Separate password signature bypasses the shared plain-text content builder.'
-    Forbid-Pattern $passwordSignatureSnapshot '\bFetchBackendPolicyStatus\s*\(|\bGetEmailSignaturePolicyStatusAsync\s*\(' 'Separate password signature performs a backend policy fetch instead of using the cache.'
-    Forbid-Pattern $passwordSignatureSnapshot '\.Result\s*(?:[;,\)\]\}]|\?\?)|\.Wait\s*\(|GetAwaiter\(\)\.GetResult\(' 'Separate password signature blocks on a backend policy fetch.'
+    Require-Pattern $passwordSignatureCapture 'policyStatus\s*==\s*null\s*\|\|\s*!policyStatus\.FetchSucceeded' 'Separate password signature accepts an unsuccessful backend-policy snapshot.'
+    Require-Order $passwordSignatureCapture 'policyStatus.FetchSucceeded' 'snapshot.Active = true' 'Separate password signature is activated before the supplied policy snapshot is verified.'
+    Require-Pattern $passwordSignatureCapture 'EmailSignatureContentBuilder[\s\S]*?\.BuildPlainText\(\s*sanitized\s*\)' 'Separate password signature bypasses the shared plain-text content builder.'
+    Forbid-Pattern $passwordSignatureCapture '\bFetchBackendPolicyStatus\s*\(|\bGetEmailSignaturePolicyStatusAsync\s*\(' 'Separate password signature performs a backend policy fetch instead of using the supplied snapshot.'
+    Forbid-Pattern $passwordSignatureCapture '\.Result\s*(?:[;,\)\]\}]|\?\?)|\.Wait\s*\(|GetAwaiter\(\)\.GetResult\(' 'Separate password signature blocks on a backend policy fetch.'
 }
 
-$passwordDispatch = Get-CSharpMethodBlock $ComposeShareLifecycleSource 'DispatchSeparatePasswordMailQueue'
+$passwordSignatureCaptureCall = Get-CSharpMethodBlock $ComposeSubscriptionSource 'RegisterSeparatePasswordDispatch'
+if ($null -eq $passwordSignatureCaptureCall) {
+    Add-Failure 'RegisterSeparatePasswordDispatch could not be parsed.'
+} else {
+    Require-Pattern $passwordSignatureCaptureCall '\bCaptureSeparatePasswordSignatureSnapshot\s*\(' 'Separate password signature snapshot is not stored with the durable password queue.'
+    Require-Pattern $passwordSignatureCaptureCall '\bpolicyStatus\b' 'Separate password signature does not use the policy snapshot supplied by share creation.'
+    Require-Pattern $passwordSignatureCaptureCall '\bCurrentSettings\b[\s\S]*?\.Clone\s*\(' 'Separate password signature does not capture its settings at share creation.'
+    Require-Order $passwordSignatureCaptureCall 'CaptureSeparatePasswordSignatureSnapshot' '_passwordDispatchQueue.Add(entry)' 'Separate password dispatch is queued before its signature snapshot is captured.'
+}
+
+$passwordDraftPreparation = Get-CSharpMethodBlock $PasswordDispatchSource 'PreparePasswordDraft'
+if ($null -eq $passwordDraftPreparation) {
+    Add-Failure 'PreparePasswordDraft could not be parsed.'
+} else {
+    Require-Order $passwordDraftPreparation 'ApplyAndVerifySeparatePasswordSender' 'ApplySeparatePasswordBackendSignature' 'Password draft signature is applied before its effective sender is verified.'
+    Require-Order $passwordDraftPreparation 'ApplySeparatePasswordBody' 'ApplySeparatePasswordBackendSignature' 'Password draft signature is applied before the password body is prepared.'
+}
+
+$passwordDispatch = Get-CSharpMethodBlock $PasswordDispatchSource 'SendPasswordDraft'
 if ($null -eq $passwordDispatch) {
-    Add-Failure 'DispatchSeparatePasswordMailQueue could not be parsed.'
+    Add-Failure 'SendPasswordDraft could not be parsed.'
 } else {
     Require-Order $passwordDispatch 'ApplyAndVerifySeparatePasswordSender' 'ApplySeparatePasswordBackendSignature' 'Separate password automatic dispatch applies the backend signature before verifying the effective sender.'
-    Require-Order $passwordDispatch 'ApplySeparatePasswordBackendSignature' ').Send();' 'Separate password automatic dispatch sends before applying the backend signature.'
+    Require-Order $passwordDispatch 'ApplySeparatePasswordBackendSignature' 'mail.Save();' 'Separate password draft is saved before applying the backend signature.'
+    Require-Order $passwordDispatch 'mail.Save();' '((Outlook._MailItem)mail).Send();' 'Separate password draft is sent before the signature-bearing draft is saved.'
+    Require-Pattern $passwordDispatch 'mail\.Display\(false\)' 'Separate password send failure does not display the saved draft for manual delivery.'
+    Forbid-Pattern $passwordDispatch '\bCreateItem\s*\(' 'Separate password failure creates a duplicate draft instead of displaying the saved draft.'
 }
 
-$passwordSignatureApply = Get-CSharpMethodBlock $ComposeShareLifecycleSource 'ApplySeparatePasswordBackendSignature'
+$passwordSignatureApply = Get-CSharpMethodBlock $PasswordDispatchSource 'ApplySeparatePasswordBackendSignature'
 if ($null -eq $passwordSignatureApply) {
     Add-Failure 'ApplySeparatePasswordBackendSignature could not be parsed.'
 } else {
@@ -380,35 +414,20 @@ if ($null -eq $managedHtmlSignature) {
     Require-Pattern $managedHtmlSignature '<div data-nc-connector-signature=\\"true\\">' 'Shared HTML signature lacks the managed signature wrapper.'
 }
 
-$passwordHtmlAppend = Get-CSharpMethodBlock $ComposeShareLifecycleSource 'AppendHtmlSignature'
+$passwordHtmlAppend = Get-CSharpMethodBlock $PasswordDispatchSource 'AppendHtmlSignature'
 if ($null -eq $passwordHtmlAppend) {
     Add-Failure 'AppendHtmlSignature could not be parsed.'
 } else {
     Require-Pattern $passwordHtmlAppend 'EmailSignatureContentBuilder\.BuildManagedHtml\(\s*sanitizedSignature\s*\)' 'Separate password HTML signature bypasses the shared managed wrapper.'
 }
 
-$passwordFallback = Get-CSharpMethodBlock $ComposeShareLifecycleSource 'TryOpenSeparatePasswordFallback'
-if ($null -eq $passwordFallback) {
-    Add-Failure 'TryOpenSeparatePasswordFallback could not be parsed.'
+$draftArming = Get-CSharpMethodBlock $PendingPasswordDraftSource 'TryArm'
+if ($null -eq $draftArming) {
+    Add-Failure 'PendingPasswordDraftController.TryArm could not be parsed.'
 } else {
-    Require-Order $passwordFallback 'ApplySeparatePasswordBody' 'fallback.Display(false)' 'Separate password manual fallback must populate its body before display.'
-    Require-Order $passwordFallback 'fallback.Display(false)' 'ApplySeparatePasswordBackendSignatureToDisplayedFallback' 'Separate password manual fallback must display before managed signature reconciliation.'
-    $fallbackDisplayIndex = $passwordFallback.IndexOf('fallback.Display(false)', [StringComparison]::Ordinal)
-    if ($fallbackDisplayIndex -lt 0) {
-        Add-Failure 'Separate password manual fallback has no display boundary.'
-    } else {
-        $passwordFallbackBeforeDisplay = $passwordFallback.Substring(0, $fallbackDisplayIndex)
-        Forbid-Pattern $passwordFallbackBeforeDisplay '\bApplySeparatePasswordBackendSignature(?:ToDisplayedFallback)?\s*\(|\bApplyManagedEmailSignature\s*\(|\bAppendHtmlSignature\s*\(' 'Separate password manual fallback appends a signature before Outlook displays and initializes the draft.'
-    }
-}
-
-$passwordDisplayedFallbackSignature = Get-CSharpMethodBlock $ComposeShareLifecycleSource 'ApplySeparatePasswordBackendSignatureToDisplayedFallback'
-if ($null -eq $passwordDisplayedFallbackSignature) {
-    Add-Failure 'ApplySeparatePasswordBackendSignatureToDisplayedFallback could not be parsed.'
-} else {
-    Require-Pattern $passwordDisplayedFallbackSignature 'ResolveSeparatePasswordEffectiveSenderEmail\(\s*mail\s*,\s*composeKey\s*\)[\s\S]*?string\.Equals\(\s*effectiveSenderEmail\s*,\s*signatureSnapshot\.UserEmail\s*,\s*StringComparison\.OrdinalIgnoreCase\s*\)' 'Displayed password fallback is not gated by the effective-sender/policy identity match.'
-    Require-Pattern $passwordDisplayedFallbackSignature 'dispatch\.IsPlainText\s*\?\s*signatureSnapshot\.PlainText\s*:\s*EmailSignatureContentBuilder\.BuildManagedHtml\(\s*signatureSnapshot\.Html\s*\)' 'Displayed password fallback does not provide plain content or the shared managed HTML wrapper to reconciliation.'
-    Require-Order $passwordDisplayedFallbackSignature 'ResolveSeparatePasswordEffectiveSenderEmail' '_passwordMailInteropController.ApplyManagedEmailSignature' 'Displayed password fallback reconciles its signature before resolving the effective sender.'
+    Require-Order $draftArming '_compose.PreparePasswordDraft' 'draft.Save();' 'Password draft is persisted before its body and signature are prepared.'
+    Require-Order $draftArming 'draft.Save();' 'WriteProperty(primary, AttemptProperty, attempt)' 'Primary send is marked before all password drafts are persisted.'
+    Require-Pattern $draftArming 'WriteProperty\(\s*draft,\s*StateProperty,\s*ArmedState\s*\)' 'Persisted password drafts are not armed for positive Sent-folder confirmation.'
 }
 
 # Compose policy reads use an asynchronous, keyed, last-known-good cache.
@@ -433,7 +452,7 @@ $onSendBlock = Get-CSharpMethodBlock $SendSource 'OnSend'
 if ($null -eq $onSendBlock) {
     Add-Failure 'Mail compose OnSend handler could not be parsed.'
 } else {
-    Require-PatternBeforeLiteral $onSendBlock 'TryFinalizeEmailSignatureBeforeSend\s*\(\s*ref\s+cancel\s*\)' '_sendPending = true' 'Signature send gate must run before send-success tracking is armed.'
+    Require-PatternBeforeLiteral $onSendBlock 'TryFinalizeEmailSignatureBeforeSend\s*\(\s*ref\s+cancel\s*\)' '_owner.TryArmPendingPasswordDrafts' 'Signature send gate must run before durable password drafts are armed.'
 }
 
 $signatureSendGate = Get-CSharpMethodBlock $SignatureSource 'TryFinalizeEmailSignatureBeforeSend'

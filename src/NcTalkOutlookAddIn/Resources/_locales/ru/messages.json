@@ -1385,6 +1385,9 @@
   "sharing_password_mail_notify_success": {
     "message": "Электронное письмо с паролем отправлено получателям $1."
   },
+  "sharing_password_mail_prepare_failed": {
+    "message": "Не удалось безопасно сохранить последующее письмо с паролем как черновик. Основное сообщение не было отправлено."
+  },
   "sharing_password_secrets_fallback_warning": {
     "message": "Nextcloud Secrets недоступен. Пароль был отправлен отдельным письмом в открытом виде."
   },

@@ -1385,6 +1385,9 @@
   "sharing_password_mail_notify_success": {
     "message": "Correo electrónico de contraseña enviado a $1 destinatario(s)."
   },
+  "sharing_password_mail_prepare_failed": {
+    "message": "No se pudo guardar de forma segura como borrador el correo posterior con la contraseña. El mensaje principal no se envió."
+  },
   "sharing_password_secrets_fallback_warning": {
     "message": "Nextcloud Secrets no está disponible. La contraseña se envió como correo separado en texto claro."
   },

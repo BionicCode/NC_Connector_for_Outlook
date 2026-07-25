@@ -270,18 +270,18 @@ namespace NcTalkOutlookAddIn.Controllers
             }
         }
 
-        internal void InsertHtmlIntoMail(Outlook.MailItem mail, string html)
+        internal bool InsertHtmlIntoMail(Outlook.MailItem mail, string html)
         {
             if (mail == null || string.IsNullOrWhiteSpace(html))
             {
-                return;
+                return false;
             }
             if (IsActiveInlineResponse(mail))
             {
                 if (TryInsertHtmlIntoActiveInlineResponseWordEditor(mail, html))
                 {
                     DiagnosticsLogger.Log(LogCategories.Core, "Inserted HTML block into inline response (ActiveInlineResponseWordEditor).");
-                    return;
+                    return true;
                 }
 
                 DiagnosticsLogger.Log(LogCategories.Core, "Failed to insert HTML into inline response: inline WordEditor insertion failed.");
@@ -290,18 +290,18 @@ namespace NcTalkOutlookAddIn.Controllers
                     Strings.DialogTitle,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
-                return;
+                return false;
             }
             if (TryInsertHtmlIntoInspectorWordEditor(mail, html))
             {
                 DiagnosticsLogger.Log(LogCategories.Core, "Inserted HTML block into mail (WordEditor InsertFile primary).");
-                return;
+                return true;
             }
 
             if (TryInsertHtmlIntoMailBody(mail, html))
             {
                 DiagnosticsLogger.Log(LogCategories.Core, "Inserted HTML block into mail (HTMLBody compatibility fallback).");
-                return;
+                return true;
             }
 
             DiagnosticsLogger.Log(LogCategories.Core, "Failed to insert HTML into mail: all insertion paths exhausted.");
@@ -310,13 +310,14 @@ namespace NcTalkOutlookAddIn.Controllers
                 Strings.DialogTitle,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+            return false;
         }
 
-        internal void InsertPlainTextIntoMail(Outlook.MailItem mail, string plainText)
+        internal bool InsertPlainTextIntoMail(Outlook.MailItem mail, string plainText)
         {
             if (mail == null || string.IsNullOrWhiteSpace(plainText))
             {
-                return;
+                return false;
             }
 
             try
@@ -331,7 +332,7 @@ namespace NcTalkOutlookAddIn.Controllers
                 if (TryInsertPlainTextViaWordEditor(mail, insertText, out source))
                 {
                     DiagnosticsLogger.Log(LogCategories.Core, "Inserted plain-text share block into mail (source=" + source + ").");
-                    return;
+                    return true;
                 }
 
                 throw new InvalidOperationException("Outlook WordEditor insertion point unavailable.");
@@ -344,6 +345,109 @@ namespace NcTalkOutlookAddIn.Controllers
                     Strings.DialogTitle,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
+        internal bool IsMailOpenInAnyInspector(Outlook.MailItem mail)
+        {
+            Outlook.Application application = _owner != null ? _owner.OutlookApplication : null;
+            if (mail == null || application == null)
+            {
+                return false;
+            }
+
+            Outlook.Inspectors inspectors = null;
+            string entryId = TryReadMailEntryId(mail);
+            try
+            {
+                inspectors = application.Inspectors;
+                int count = inspectors != null ? inspectors.Count : 0;
+                for (int i = 1; i <= count; i++)
+                {
+                    Outlook.Inspector inspector = null;
+                    object currentItem = null;
+                    Outlook.MailItem currentMail = null;
+                    try
+                    {
+                        inspector = inspectors[i];
+                        currentItem = inspector != null ? inspector.CurrentItem : null;
+                        currentMail = currentItem as Outlook.MailItem;
+                        if (currentMail == null)
+                        {
+                            continue;
+                        }
+                        if (ComInteropScope.AreSameObject(
+                            mail,
+                            currentMail,
+                            LogCategories.FileLink,
+                            "MailItem",
+                            "Inspector.CurrentItem"))
+                        {
+                            return true;
+                        }
+
+                        string currentEntryId = TryReadMailEntryId(currentMail);
+                        if (!string.IsNullOrWhiteSpace(entryId)
+                            && string.Equals(
+                                entryId,
+                                currentEntryId,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+                    finally
+                    {
+                        if (currentMail != null && !ReferenceEquals(currentMail, mail))
+                        {
+                            ComInteropScope.TryRelease(
+                                currentMail,
+                                LogCategories.FileLink,
+                                "Failed to release inspector compose MailItem.");
+                        }
+                        if (currentItem != null
+                            && !ReferenceEquals(currentItem, currentMail)
+                            && !ReferenceEquals(currentItem, mail))
+                        {
+                            ComInteropScope.TryRelease(
+                                currentItem,
+                                LogCategories.FileLink,
+                                "Failed to release inspector compose item.");
+                        }
+                        ComInteropScope.TryRelease(
+                            inspector,
+                            LogCategories.FileLink,
+                            "Failed to release compose Inspector.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLogger.LogException(
+                    LogCategories.FileLink,
+                    "Failed to inspect open compose windows.",
+                    ex);
+            }
+            finally
+            {
+                ComInteropScope.TryRelease(
+                    inspectors,
+                    LogCategories.FileLink,
+                    "Failed to release compose Inspectors collection.");
+            }
+            return false;
+        }
+
+        private static string TryReadMailEntryId(Outlook.MailItem mail)
+        {
+            try
+            {
+                return mail != null ? (mail.EntryID ?? string.Empty) : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
             }
         }
 

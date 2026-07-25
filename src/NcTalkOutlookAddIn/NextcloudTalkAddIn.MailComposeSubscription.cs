@@ -60,16 +60,6 @@ namespace NcTalkOutlookAddIn
                 internal long ThresholdBytes { get; set; }
             }
 
-            private sealed class ComposeShareCleanupEntry
-            {
-                internal string RelativeFolder { get; set; }
-
-                internal string ShareId { get; set; }
-
-                internal string ShareLabel { get; set; }
-
-            }
-
             private sealed class BeforeAddShareEntry
             {
                 internal AttachmentBatchEntry Candidate { get; set; }
@@ -104,14 +94,14 @@ namespace NcTalkOutlookAddIn
             private readonly System.Windows.Forms.Timer _emailSignatureTimer = new System.Windows.Forms.Timer();
             private readonly List<AttachmentBatchEntry> _pendingAddedBatch = new List<AttachmentBatchEntry>();
             private readonly List<BeforeAddShareEntry> _pendingBeforeAddShareEntries = new List<BeforeAddShareEntry>();
-            private readonly List<ComposeShareCleanupEntry> _cleanupEntries = new List<ComposeShareCleanupEntry>();
             private readonly List<SeparatePasswordDispatchEntry> _passwordDispatchQueue = new List<SeparatePasswordDispatchEntry>();
+            private AttachmentAutomationSettings _attachmentAutomationSettingsSnapshot;
+            private DateTime _attachmentAutomationSettingsSnapshotUtc;
+            private Task<AttachmentAutomationSettings> _attachmentAutomationSettingsRefreshTask;
             private bool _attachmentSuppressed;
             private bool _attachmentPromptOpen;
             private bool _beforeAddShareFlowRunning;
-            private bool _sendPending;
-            private DateTime _sendPendingAtUtc;
-            private bool _awaitingGraceCloseResolution;
+            private int _surfaceCloseVerificationAttempts;
             private bool _emailSignatureApplying;
             private bool _isInlineResponse;
             private ComposeSurfaceState _composeSurfaceState;
@@ -156,7 +146,7 @@ namespace NcTalkOutlookAddIn
                 _beforeAddShareTimer.Interval = BeforeAddShareBatchDebounceMs;
                 _beforeAddShareTimer.Tick += OnBeforeAddShareTimerTick;
 
-                _cleanupGraceTimer.Interval = ComposeShareCleanupSendGraceMs;
+                _cleanupGraceTimer.Interval = 250;
                 _cleanupGraceTimer.Tick += OnCleanupGraceTimerTick;
 
                 _emailSignatureTimer.Interval = isInlineResponse ? EmailSignatureInlineApplyDebounceMs : EmailSignatureApplyDebounceMs;
@@ -185,6 +175,7 @@ namespace NcTalkOutlookAddIn
                     + (_inlineExplorerIdentityKey ?? string.Empty)
                     + ").");
 
+                BeginAttachmentAutomationSettingsRefresh();
                 ScheduleEmailSignatureApplication("compose_open");
             }
 
@@ -296,6 +287,7 @@ namespace NcTalkOutlookAddIn
                     "compose surface changed (from=InlineResponse, to=Detached, explorerKey="
                     + normalizedExplorerIdentityKey
                     + ").");
+                ScheduleSurfaceCloseVerification("inline_response_close");
             }
 
             private void DeferEmailSignatureApplication(string reason, string source)
@@ -370,54 +362,17 @@ namespace NcTalkOutlookAddIn
                     && string.Equals(_inspectorIdentityKey, inspectorIdentityKey ?? string.Empty, StringComparison.Ordinal);
             }
 
-            internal void ArmShareCleanup(FileLinkResult result)
-            {
-                if (result == null)
-                {
-                    return;
-                }
-                string relativeFolder = string.IsNullOrWhiteSpace(result.RelativePath)
-                    ? string.Empty
-                    : result.RelativePath.Trim();
-                if (string.IsNullOrWhiteSpace(relativeFolder))
-                {
-                    LogFileLink("Compose share cleanup arm skipped (composeKey=" + _composeKey + ", reason=missing_relative_folder).");
-                    return;
-                }
-
-                _cleanupGraceTimer.Stop();
-                _awaitingGraceCloseResolution = false;
-                _sendPending = false;
-
-                _cleanupEntries.Add(new ComposeShareCleanupEntry
-                {
-                    RelativeFolder = relativeFolder,
-                    ShareId = result.ShareId ?? string.Empty,
-                    ShareLabel = result.FolderName ?? string.Empty
-                });
-
-                LogFileLink(
-                    "Compose share cleanup armed (composeKey="
-                    + _composeKey
-                    + ", relativeFolder="
-                    + relativeFolder
-                    + ", shareId="
-                    + (result.ShareId ?? string.Empty)
-                    + ", shareLabel="
-                    + (result.FolderName ?? string.Empty)
-                    + ", armedCount="
-                    + _cleanupEntries.Count.ToString(CultureInfo.InvariantCulture)
-                    + ").");
-            }
-
             internal void RegisterSeparatePasswordDispatch(
                 FileLinkResult result,
                 FileLinkRequest request,
                 string passwordOnlyHtml,
                 string passwordOnlyPlainText,
+                string secretsHtmlTemplate,
+                string secretsPlainTextTemplate,
                 bool isPlainText,
                 string languageOverride,
-                BackendPolicyStatus policyStatus)
+                BackendPolicyStatus policyStatus,
+                ComposeLifecycleOrigin origin)
             {
                 if (result == null || request == null)
                 {
@@ -449,6 +404,8 @@ namespace NcTalkOutlookAddIn
                     Password = password.Trim(),
                     Html = passwordOnlyHtml,
                     PlainText = passwordOnlyPlainText,
+                    SecretsHtmlTemplate = secretsHtmlTemplate,
+                    SecretsPlainTextTemplate = secretsPlainTextTemplate,
                     IsPlainText = isPlainText,
                     DeliveryMode = deliveryPolicy.Mode,
                     SecretsExpireDays = deliveryPolicy.SecretsExpireDays,
@@ -456,9 +413,17 @@ namespace NcTalkOutlookAddIn
                     BackendPolicyStatus = policyStatus,
                     To = ComposeShareLifecycleController.BuildNormalizedRecipientCsv(ReadMailRecipientList("To")),
                     Cc = ComposeShareLifecycleController.BuildNormalizedRecipientCsv(ReadMailRecipientList("CC")),
-                    Bcc = ComposeShareLifecycleController.BuildNormalizedRecipientCsv(ReadMailRecipientList("BCC"))
+                    Bcc = ComposeShareLifecycleController.BuildNormalizedRecipientCsv(ReadMailRecipientList("BCC")),
+                    Origin = origin != null ? origin.Clone() : null
                 };
 
+                _owner.CaptureSeparatePasswordSignatureSnapshot(
+                    new List<SeparatePasswordDispatchEntry> { entry },
+                    policyStatus,
+                    _owner.CurrentSettings != null
+                        ? _owner.CurrentSettings.Clone()
+                        : new AddinSettings(),
+                    _composeKey);
                 _passwordDispatchQueue.Add(entry);
                 LogFileLink(
                     "Separate password dispatch registered (composeKey="
@@ -649,12 +614,8 @@ namespace NcTalkOutlookAddIn
                 LogFileLink(
                     "Compose subscription disposed (composeKey="
                     + _composeKey
-                    + ", hadCleanup="
-                    + (_cleanupEntries.Count > 0).ToString(CultureInfo.InvariantCulture)
                     + ", hadPasswordDispatch="
                     + (_passwordDispatchQueue.Count > 0).ToString(CultureInfo.InvariantCulture)
-                    + ", delayed="
-                    + _awaitingGraceCloseResolution.ToString(CultureInfo.InvariantCulture)
                     + ").");
             }
         }

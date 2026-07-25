@@ -62,7 +62,6 @@ namespace NcTalkOutlookAddIn
         private OutlookUiSynchronizationContext _uiSynchronizationContext;
         private IRibbonUI _ribbonUi;
         private const int ComposeAttachmentEvalDebounceMs = 250;
-        private const int ComposeShareCleanupSendGraceMs = 15000;
 
         internal const string IcalToken = "X-NCTALK-TOKEN";
         internal const string IcalUrl = "X-NCTALK-URL";
@@ -80,7 +79,7 @@ namespace NcTalkOutlookAddIn
         public NextcloudTalkAddIn()
         {
             _talkAppointmentController = new TalkAppointmentController(this);
-            _composeShareLifecycleController = new ComposeShareLifecycleController(this);
+            _composeShareLifecycleController = new ComposeShareLifecycleController();
             _fileLinkLaunchController = new FileLinkLaunchController(this);
             _talkRibbonController = new TalkRibbonController(this);
             _mailInteropController = new MailInteropController(this);
@@ -549,16 +548,6 @@ namespace NcTalkOutlookAddIn
         internal bool IsActiveInlineResponse(Outlook.MailItem mail)
         {
             return _mailInteropController.IsActiveInlineResponse(mail);
-        }
-
-        internal void InsertHtmlIntoMail(Outlook.MailItem mail, string html)
-        {
-            _mailInteropController.InsertHtmlIntoMail(mail, html);
-        }
-
-        internal void InsertPlainTextIntoMail(Outlook.MailItem mail, string plainText)
-        {
-            _mailInteropController.InsertPlainTextIntoMail(mail, plainText);
         }
 
         internal static bool TryWriteAppointmentHtmlBody(Outlook.AppointmentItem appointment, string html)

@@ -1406,6 +1406,9 @@
   "sharing_password_mail_notify_success": {
     "message": "Passwort-E-Mail wurde an $1 Empfaenger gesendet."
   },
+  "sharing_password_mail_prepare_failed": {
+    "message": "Die Passwort-Folge-E-Mail konnte nicht sicher als Entwurf gespeichert werden. Die Hauptnachricht wurde nicht gesendet."
+  },
   "sharing_password_secrets_fallback_warning": {
     "message": "Nextcloud Secrets ist nicht verfuegbar. Das Passwort wurde als separate Klartext-E-Mail gesendet."
   },

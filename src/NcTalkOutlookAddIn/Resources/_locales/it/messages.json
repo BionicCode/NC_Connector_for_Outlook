@@ -1385,6 +1385,9 @@
   "sharing_password_mail_notify_success": {
     "message": "E-mail con password inviata ai destinatari $1."
   },
+  "sharing_password_mail_prepare_failed": {
+    "message": "Non è stato possibile salvare in modo sicuro come bozza l’e-mail successiva con la password. Il messaggio principale non è stato inviato."
+  },
   "sharing_password_secrets_fallback_warning": {
     "message": "Nextcloud Secrets non è disponibile. La password è stata inviata in un’e-mail separata in testo semplice."
   },

@@ -1385,6 +1385,9 @@
   "sharing_password_mail_notify_success": {
     "message": "Wachtwoord-e-mail verzonden naar $1 ontvanger(s)."
   },
+  "sharing_password_mail_prepare_failed": {
+    "message": "De vervolgmail met het wachtwoord kon niet veilig als concept worden opgeslagen. Het hoofdbericht is niet verzonden."
+  },
   "sharing_password_secrets_fallback_warning": {
     "message": "Nextcloud Secrets is niet beschikbaar. Het wachtwoord is als aparte e-mail in platte tekst verzonden."
   },

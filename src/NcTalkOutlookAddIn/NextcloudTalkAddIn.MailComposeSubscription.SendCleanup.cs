@@ -5,16 +5,9 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using NcTalkOutlookAddIn.Controllers;
-using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Services;
-using NcTalkOutlookAddIn.Settings;
-using NcTalkOutlookAddIn.UI;
 using NcTalkOutlookAddIn.Utilities;
 using Outlook = Microsoft.Office.Interop.Outlook;
 
@@ -24,59 +17,44 @@ namespace NcTalkOutlookAddIn
     {
         internal sealed partial class MailComposeSubscription
         {
+            private const int SurfaceCloseVerificationMaxAttempts = 8;
+
             private void OnSend(ref bool cancel)
             {
-                if (_disposed)
+                if (_disposed || cancel)
                 {
                     return;
                 }
-                if (cancel)
-                {
-                    LogFileLink("Compose send cancelled before dispatch handling (composeKey=" + _composeKey + ").");
-                    return;
-                }
-
-                if (!TryFinalizeEmailSignatureBeforeSend(ref cancel))
+                if (!TryValidateAttachmentPolicyBeforeSend(ref cancel)
+                    || !TryFinalizeEmailSignatureBeforeSend(ref cancel))
                 {
                     return;
                 }
-
-                _sendPending = true;
-                _sendPendingAtUtc = DateTime.UtcNow;
-                _cleanupGraceTimer.Stop();
-                _awaitingGraceCloseResolution = false;
 
                 CapturePasswordDispatchRecipients();
                 CapturePasswordDispatchSender();
-                SchedulePostSendGraceCheckIfNeeded();
-                LogFileLink(
-                    "Compose send state updated (composeKey="
-                    + _composeKey
-                    + ", sendPending="
-                    + _sendPending.ToString(CultureInfo.InvariantCulture)
-                    + ", cleanupArmedCount="
-                    + _cleanupEntries.Count.ToString(CultureInfo.InvariantCulture)
-                    + ").");
-            }
 
-            private void SchedulePostSendGraceCheckIfNeeded()
-            {
-                if (_cleanupEntries.Count == 0 && _passwordDispatchQueue.Count == 0)
+                if (_passwordDispatchQueue.Count > 0)
                 {
-                    return;
+                    if (!_owner.TryArmPendingPasswordDrafts(
+                        _mail,
+                        _composeKey,
+                        _passwordDispatchQueue))
+                    {
+                        cancel = true;
+                        MessageBox.Show(
+                            Strings.SharingPasswordMailPrepareFailed,
+                            Strings.DialogTitle,
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        return;
+                    }
                 }
 
-                _awaitingGraceCloseResolution = true;
-                _cleanupGraceTimer.Interval = ComposeShareCleanupSendGraceMs;
-                _cleanupGraceTimer.Start();
-
+                _cleanupGraceTimer.Stop();
                 LogFileLink(
-                    "Compose post-send cleanup check scheduled (composeKey="
+                    "Compose send armed for positive Sent confirmation (composeKey="
                     + _composeKey
-                    + ", delayMs="
-                    + ComposeShareCleanupSendGraceMs.ToString(CultureInfo.InvariantCulture)
-                    + ", cleanupArmedCount="
-                    + _cleanupEntries.Count.ToString(CultureInfo.InvariantCulture)
                     + ", passwordQueued="
                     + _passwordDispatchQueue.Count.ToString(CultureInfo.InvariantCulture)
                     + ").");
@@ -89,234 +67,60 @@ namespace NcTalkOutlookAddIn
                     return;
                 }
 
-                ComposeSendState sendState = EvaluateMailSendState();
-                bool hasPendingPostSendWork = _cleanupEntries.Count > 0 || _passwordDispatchQueue.Count > 0;
-                int delayMs = 0;
-                if (_sendPending)
+                ScheduleSurfaceCloseVerification(
+                    cancel ? "close_already_cancelled" : "close_event");
+            }
+
+            private void ScheduleSurfaceCloseVerification(string reason)
+            {
+                if (_disposed)
                 {
-                    double elapsedMs = (DateTime.UtcNow - _sendPendingAtUtc).TotalMilliseconds;
-                    delayMs = (int)Math.Max(0, ComposeShareCleanupSendGraceMs - elapsedMs);
-                }
-                if (sendState == ComposeSendState.Sent)
-                {
-                    ClearShareCleanupEntries("after_send_success");
-                    DispatchSeparatePasswordQueue("after_send_success");
-                    Dispose();
                     return;
                 }
-                if (sendState == ComposeSendState.UnavailableAfterSend)
-                {
-                    if (hasPendingPostSendWork && delayMs > 0)
-                    {
-                        _awaitingGraceCloseResolution = true;
-                        _cleanupGraceTimer.Interval = Math.Max(250, delayMs);
-                        _cleanupGraceTimer.Start();
 
-                        LogFileLink(
-                            "Compose share cleanup delayed (composeKey="
-                            + _composeKey
-                            + ", delayMs="
-                            + delayMs.ToString(CultureInfo.InvariantCulture)
-                            + ", reason=close_send_state_unavailable).");
-                        return;
-                    }
-
-                    ClearShareCleanupEntries("after_send_state_unavailable");
-                    DispatchSeparatePasswordQueue("after_send_state_unavailable");
-                    Dispose();
-                    return;
-                }
-                if (hasPendingPostSendWork && _sendPending && delayMs > 0)
-                {
-                    _awaitingGraceCloseResolution = true;
-                    _cleanupGraceTimer.Interval = Math.Max(250, delayMs);
-                    _cleanupGraceTimer.Start();
-
-                    LogFileLink(
-                        "Compose share cleanup delayed (composeKey="
-                        + _composeKey
-                        + ", delayMs="
-                        + delayMs.ToString(CultureInfo.InvariantCulture)
-                        + ", reason=close_send_pending).");
-                    return;
-                }
-                if (hasPendingPostSendWork && _sendPending)
-                {
-                    LogFileLink(
-                        "Compose send state not confirmed after grace; applying unsent cleanup path (composeKey="
-                        + _composeKey
-                        + ", reason=close_send_pending_timeout).");
-                    DeleteShareCleanupEntries("close_send_pending_timeout_without_successful_send");
-                    ClearSeparatePasswordDispatchQueue("close_send_pending_timeout_without_successful_send");
-                    Dispose();
-                    return;
-                }
-                if (_cleanupEntries.Count > 0)
-                {
-                    DeleteShareCleanupEntries("close_without_successful_send");
-                }
-                if (_passwordDispatchQueue.Count > 0)
-                {
-                    ClearSeparatePasswordDispatchQueue("close_without_successful_send");
-                }
-
-                Dispose();
+                _surfaceCloseVerificationAttempts = 0;
+                _cleanupGraceTimer.Stop();
+                _cleanupGraceTimer.Interval = 250;
+                _cleanupGraceTimer.Start();
+                LogFileLink(
+                    "Compose surface-close verification scheduled (composeKey="
+                    + _composeKey
+                    + ", reason="
+                    + (reason ?? string.Empty)
+                    + ").");
             }
 
             private void OnCleanupGraceTimerTick(object sender, EventArgs e)
             {
                 _cleanupGraceTimer.Stop();
-
-                ComposeSendState sendState = EvaluateMailSendState();
-                if (sendState == ComposeSendState.Sent || sendState == ComposeSendState.UnavailableAfterSend)
-                {
-                    string reason = sendState == ComposeSendState.Sent
-                        ? "delayed_after_send_success"
-                        : "delayed_after_send_state_unavailable";
-                    ClearShareCleanupEntries(reason);
-                    DispatchSeparatePasswordQueue(reason);
-                }
-                else
-                {
-                    if (_sendPending)
-                    {
-                        LogFileLink(
-                            "Compose send state not confirmed after delayed grace; applying unsent cleanup path (composeKey="
-                            + _composeKey
-                            + ", reason=delayed_send_pending_timeout).");
-                        DeleteShareCleanupEntries("delayed_send_pending_timeout_without_successful_send");
-                        ClearSeparatePasswordDispatchQueue("delayed_send_pending_timeout_without_successful_send");
-                    }
-                    else
-                    {
-                        DeleteShareCleanupEntries("delayed_close_without_successful_send");
-                        ClearSeparatePasswordDispatchQueue("delayed_close_without_successful_send");
-                    }
-                }
-
-                Dispose();
-            }
-
-            private enum ComposeSendState
-            {
-                NotSent,
-                Sent,
-                UnavailableAfterSend
-            }
-
-            private ComposeSendState EvaluateMailSendState()
-            {
-                try
-                {
-                    return _mail != null && _mail.Sent ? ComposeSendState.Sent : ComposeSendState.NotSent;
-                }
-                catch (Exception ex)
-                {
-                    if (_sendPending && IsMailSentUnavailableAfterSend(ex))
-                    {
-                        LogFileLink(
-                            "Compose send state unavailable after send (composeKey="
-                            + _composeKey
-                            + ", hresult="
-                            + ToHResultHex(ex)
-                            + ").");
-                        return ComposeSendState.UnavailableAfterSend;
-                    }
-
-                    DiagnosticsLogger.LogException(
-                        LogCategories.FileLink,
-                        "Failed to read MailItem.Sent (composeKey=" + _composeKey + ").",
-                        ex);
-                    return ComposeSendState.NotSent;
-                }
-            }
-
-            private static bool IsMailSentUnavailableAfterSend(Exception ex)
-            {
-                var comException = ex as COMException;
-                if (comException == null)
-                {
-                    return false;
-                }
-
-                uint errorCode = unchecked((uint)comException.ErrorCode);
-                return (errorCode & 0xFFFFu) == 0x010Au;
-            }
-
-            private static string ToHResultHex(Exception ex)
-            {
-                if (ex == null)
-                {
-                    return "0x00000000";
-                }
-                return "0x" + unchecked((uint)ex.HResult).ToString("X8", CultureInfo.InvariantCulture);
-            }
-
-            private void ClearShareCleanupEntries(string reason)
-            {
-                if (_cleanupEntries.Count == 0)
+                if (_disposed)
                 {
                     return;
                 }
-                for (int i = 0; i < _cleanupEntries.Count; i++)
+
+                _surfaceCloseVerificationAttempts++;
+                if (_owner.IsMailComposeSurfaceOpen(_mail))
                 {
-                    ComposeShareCleanupEntry entry = _cleanupEntries[i];
+                    _surfaceCloseVerificationAttempts = 0;
                     LogFileLink(
-                        "Compose share cleanup cleared (composeKey="
+                        "Compose surface remains open; close cleanup cancelled (composeKey="
                         + _composeKey
-                        + ", reason="
-                        + (reason ?? string.Empty)
-                        + ", relativeFolder="
-                        + (entry.RelativeFolder ?? string.Empty)
-                        + ", shareId="
-                        + (entry.ShareId ?? string.Empty)
-                        + ", shareLabel="
-                        + (entry.ShareLabel ?? string.Empty)
                         + ").");
-                }
-
-                _cleanupEntries.Clear();
-                _sendPending = false;
-                _awaitingGraceCloseResolution = false;
-            }
-
-            private void DeleteShareCleanupEntries(string reason)
-            {
-                if (_cleanupEntries.Count == 0)
-                {
                     return;
                 }
 
-                List<ComposeShareCleanupEntry> entries = new List<ComposeShareCleanupEntry>(_cleanupEntries);
-                _cleanupEntries.Clear();
-                _sendPending = false;
-                _awaitingGraceCloseResolution = false;
-
-                for (int i = 0; i < entries.Count; i++)
+                if (_surfaceCloseVerificationAttempts
+                    < SurfaceCloseVerificationMaxAttempts)
                 {
-                    ComposeShareCleanupEntry entry = entries[i];
-                    _owner._composeShareLifecycleController.TryDeleteComposeShareFolder(
-                        entry.RelativeFolder,
-                        reason,
-                        entry.ShareId,
-                        entry.ShareLabel);
-                }
-            }
-
-            private void ClearSeparatePasswordDispatchQueue(string reason)
-            {
-                if (_passwordDispatchQueue.Count == 0)
-                {
+                    _cleanupGraceTimer.Start();
                     return;
                 }
 
-                _passwordDispatchQueue.Clear();
                 LogFileLink(
-                    "Separate password dispatch cleared (composeKey="
+                    "Compose surface closed; unknown state retained without destructive cleanup (composeKey="
                     + _composeKey
-                    + ", reason="
-                    + (reason ?? string.Empty)
                     + ").");
+                Dispose();
             }
 
             private void CapturePasswordDispatchRecipients()
@@ -328,12 +132,19 @@ namespace NcTalkOutlookAddIn
                 string to;
                 string cc;
                 string bcc;
-                bool capturedFromRecipients = TryCaptureRecipientListsFromRecipientsCollection(out to, out cc, out bcc);
+                bool capturedFromRecipients =
+                    TryCaptureRecipientListsFromRecipientsCollection(
+                        out to,
+                        out cc,
+                        out bcc);
                 if (!capturedFromRecipients)
                 {
-                    to = ComposeShareLifecycleController.BuildNormalizedRecipientCsv(ReadMailRecipientList("To"));
-                    cc = ComposeShareLifecycleController.BuildNormalizedRecipientCsv(ReadMailRecipientList("CC"));
-                    bcc = ComposeShareLifecycleController.BuildNormalizedRecipientCsv(ReadMailRecipientList("BCC"));
+                    to = ComposeShareLifecycleController.BuildNormalizedRecipientCsv(
+                        ReadMailRecipientList("To"));
+                    cc = ComposeShareLifecycleController.BuildNormalizedRecipientCsv(
+                        ReadMailRecipientList("CC"));
+                    bcc = ComposeShareLifecycleController.BuildNormalizedRecipientCsv(
+                        ReadMailRecipientList("BCC"));
                 }
                 for (int i = 0; i < _passwordDispatchQueue.Count; i++)
                 {
@@ -354,7 +165,9 @@ namespace NcTalkOutlookAddIn
                     + ", bcc="
                     + CountRecipients(bcc).ToString(CultureInfo.InvariantCulture)
                     + ", source="
-                    + (capturedFromRecipients ? "recipients_collection" : "mail_fields")
+                    + (capturedFromRecipients
+                        ? "recipients_collection"
+                        : "mail_fields")
                     + ").");
             }
 
@@ -365,19 +178,26 @@ namespace NcTalkOutlookAddIn
                     return;
                 }
 
-                string senderEmail = EmailSignaturePolicyService.NormalizeEmail(ResolveCurrentSenderEmail());
-                string accountSmtp = EmailSignaturePolicyService.NormalizeEmail(
-                    OutlookRecipientResolverController.ResolveSendUsingAccountSmtpAddress(
-                        _mail,
-                        LogCategories.Core,
-                        "compose",
-                        string.Empty));
-                string sentOnBehalfOfName = ReadCurrentSentOnBehalfOfName();
+                string senderEmail =
+                    EmailSignaturePolicyService.NormalizeEmail(
+                        ResolveCurrentSenderEmail());
+                string accountSmtp =
+                    EmailSignaturePolicyService.NormalizeEmail(
+                        OutlookRecipientResolverController
+                            .ResolveSendUsingAccountSmtpAddress(
+                                _mail,
+                                LogCategories.Core,
+                                "compose",
+                                string.Empty));
+                string sentOnBehalfOfName =
+                    ReadCurrentSentOnBehalfOfName();
                 for (int i = 0; i < _passwordDispatchQueue.Count; i++)
                 {
                     _passwordDispatchQueue[i].SenderEmail = senderEmail;
-                    _passwordDispatchQueue[i].SendUsingAccountSmtpAddress = accountSmtp;
-                    _passwordDispatchQueue[i].SentOnBehalfOfName = sentOnBehalfOfName;
+                    _passwordDispatchQueue[i]
+                        .SendUsingAccountSmtpAddress = accountSmtp;
+                    _passwordDispatchQueue[i]
+                        .SentOnBehalfOfName = sentOnBehalfOfName;
                 }
 
                 LogFileLink(
@@ -386,11 +206,14 @@ namespace NcTalkOutlookAddIn
                     + ", queued="
                     + _passwordDispatchQueue.Count.ToString(CultureInfo.InvariantCulture)
                     + ", hasSender="
-                    + (!string.IsNullOrWhiteSpace(senderEmail)).ToString(CultureInfo.InvariantCulture)
+                    + (!string.IsNullOrWhiteSpace(senderEmail))
+                        .ToString(CultureInfo.InvariantCulture)
                     + ", hasAccount="
-                    + (!string.IsNullOrWhiteSpace(accountSmtp)).ToString(CultureInfo.InvariantCulture)
+                    + (!string.IsNullOrWhiteSpace(accountSmtp))
+                        .ToString(CultureInfo.InvariantCulture)
                     + ", sentOnBehalf="
-                    + (!string.IsNullOrWhiteSpace(sentOnBehalfOfName)).ToString(CultureInfo.InvariantCulture)
+                    + (!string.IsNullOrWhiteSpace(sentOnBehalfOfName))
+                        .ToString(CultureInfo.InvariantCulture)
                     + ").");
             }
 
@@ -398,7 +221,9 @@ namespace NcTalkOutlookAddIn
             {
                 try
                 {
-                    return _mail != null ? (_mail.SentOnBehalfOfName ?? string.Empty).Trim() : string.Empty;
+                    return _mail != null
+                        ? (_mail.SentOnBehalfOfName ?? string.Empty).Trim()
+                        : string.Empty;
                 }
                 catch (Exception ex)
                 {
@@ -410,7 +235,10 @@ namespace NcTalkOutlookAddIn
                 }
             }
 
-            private bool TryCaptureRecipientListsFromRecipientsCollection(out string to, out string cc, out string bcc)
+            private bool TryCaptureRecipientListsFromRecipientsCollection(
+                out string to,
+                out string cc,
+                out string bcc)
             {
                 to = string.Empty;
                 cc = string.Empty;
@@ -419,6 +247,7 @@ namespace NcTalkOutlookAddIn
                 {
                     return false;
                 }
+
                 var toRecipients = new List<string>();
                 var ccRecipients = new List<string>();
                 var bccRecipients = new List<string>();
@@ -430,7 +259,8 @@ namespace NcTalkOutlookAddIn
                     {
                         return false;
                     }
-                    int count = 0;
+
+                    int count;
                     try
                     {
                         count = recipients.Count;
@@ -443,6 +273,7 @@ namespace NcTalkOutlookAddIn
                             ex);
                         count = 0;
                     }
+
                     for (int i = 1; i <= count; i++)
                     {
                         Outlook.Recipient recipient = null;
@@ -453,12 +284,17 @@ namespace NcTalkOutlookAddIn
                             {
                                 continue;
                             }
-                            string address = TryGetRecipientSmtpAddress(recipient);
+
+                            string address =
+                                TryGetRecipientSmtpAddress(recipient);
                             if (string.IsNullOrWhiteSpace(address))
                             {
                                 try
                                 {
-                                    address = ComposeShareLifecycleController.NormalizeRecipientAddress(recipient.Address);
+                                    address =
+                                        ComposeShareLifecycleController
+                                            .NormalizeRecipientAddress(
+                                                recipient.Address);
                                 }
                                 catch (Exception ex)
                                 {
@@ -473,7 +309,8 @@ namespace NcTalkOutlookAddIn
                             {
                                 continue;
                             }
-                            int recipientType = 1;
+
+                            int recipientType;
                             try
                             {
                                 recipientType = recipient.Type;
@@ -484,24 +321,41 @@ namespace NcTalkOutlookAddIn
                                     LogCategories.FileLink,
                                     "Failed to read compose recipient.Type (composeKey=" + _composeKey + ").",
                                     ex);
-                                recipientType = 1;
+                                recipientType =
+                                    (int)Outlook.OlMailRecipientType.olTo;
                             }
-                            if (recipientType == (int)Outlook.OlMailRecipientType.olCC)
+
+                            if (recipientType
+                                == (int)Outlook.OlMailRecipientType.olCC)
                             {
-                                ComposeShareLifecycleController.AddUniqueRecipient(ccRecipients, address);
+                                ComposeShareLifecycleController
+                                    .AddUniqueRecipient(
+                                        ccRecipients,
+                                        address);
                             }
-                            else if (recipientType == (int)Outlook.OlMailRecipientType.olBCC)
+                            else if (recipientType
+                                     == (int)Outlook.OlMailRecipientType
+                                         .olBCC)
                             {
-                                ComposeShareLifecycleController.AddUniqueRecipient(bccRecipients, address);
+                                ComposeShareLifecycleController
+                                    .AddUniqueRecipient(
+                                        bccRecipients,
+                                        address);
                             }
                             else
                             {
-                                ComposeShareLifecycleController.AddUniqueRecipient(toRecipients, address);
+                                ComposeShareLifecycleController
+                                    .AddUniqueRecipient(
+                                        toRecipients,
+                                        address);
                             }
                         }
                         finally
                         {
-                            ComInteropScope.TryRelease(recipient, LogCategories.FileLink, "Failed to release compose Recipient COM object.");
+                            ComInteropScope.TryRelease(
+                                recipient,
+                                LogCategories.FileLink,
+                                "Failed to release compose Recipient COM object.");
                         }
                     }
                 }
@@ -515,32 +369,24 @@ namespace NcTalkOutlookAddIn
                 }
                 finally
                 {
-                    ComInteropScope.TryRelease(recipients, LogCategories.FileLink, "Failed to release compose Recipients COM object.");
+                    ComInteropScope.TryRelease(
+                        recipients,
+                        LogCategories.FileLink,
+                        "Failed to release compose Recipients COM object.");
                 }
 
-                to = toRecipients.Count == 0 ? string.Empty : string.Join("; ", toRecipients.ToArray());
-                cc = ccRecipients.Count == 0 ? string.Empty : string.Join("; ", ccRecipients.ToArray());
-                bcc = bccRecipients.Count == 0 ? string.Empty : string.Join("; ", bccRecipients.ToArray());
-                return toRecipients.Count + ccRecipients.Count + bccRecipients.Count > 0;
-            }
-
-            private void DispatchSeparatePasswordQueue(string reason)
-            {
-                if (_passwordDispatchQueue.Count == 0)
-                {
-                    return;
-                }
-                var queue = new List<SeparatePasswordDispatchEntry>(_passwordDispatchQueue);
-                _passwordDispatchQueue.Clear();
-                LogFileLink(
-                    "Separate password dispatch taken (composeKey="
-                    + _composeKey
-                    + ", reason="
-                    + (reason ?? string.Empty)
-                    + ", queued="
-                    + queue.Count.ToString(CultureInfo.InvariantCulture)
-                    + ").");
-                _owner._composeShareLifecycleController.DispatchSeparatePasswordMailQueue(_composeKey, queue);
+                to = toRecipients.Count == 0
+                    ? string.Empty
+                    : string.Join("; ", toRecipients.ToArray());
+                cc = ccRecipients.Count == 0
+                    ? string.Empty
+                    : string.Join("; ", ccRecipients.ToArray());
+                bcc = bccRecipients.Count == 0
+                    ? string.Empty
+                    : string.Join("; ", bccRecipients.ToArray());
+                return toRecipients.Count
+                       + ccRecipients.Count
+                       + bccRecipients.Count > 0;
             }
 
             private string ReadMailRecipientList(string fieldName)
@@ -552,7 +398,9 @@ namespace NcTalkOutlookAddIn
                         return string.Empty;
                     }
 
-                    switch ((fieldName ?? string.Empty).Trim().ToUpperInvariant())
+                    switch ((fieldName ?? string.Empty)
+                        .Trim()
+                        .ToUpperInvariant())
                     {
                         case "TO":
                             return _mail.To ?? string.Empty;
@@ -576,10 +424,9 @@ namespace NcTalkOutlookAddIn
 
             private static int CountRecipients(string csv)
             {
-                return ComposeShareLifecycleController.CountRecipientsInCsv(csv);
+                return ComposeShareLifecycleController
+                    .CountRecipientsInCsv(csv);
             }
-
         }
     }
 }
-

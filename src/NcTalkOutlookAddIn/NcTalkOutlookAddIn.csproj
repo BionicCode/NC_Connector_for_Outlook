@@ -93,6 +93,7 @@
     <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs" />
     <Compile Include="NextcloudTalkAddIn.AppointmentSubscription.cs" />
     <Compile Include="NextcloudTalkAddIn.SubscriptionEnsure.cs" />
+    <Compile Include="NextcloudTalkAddIn.ComposeLifecycle.cs" />
     <Compile Include="NextcloudTalkAddIn.TalkAppointmentSync.cs" />
     <Compile Include="NextcloudTalkAddIn.TalkCalendarLifecycle.cs" />
     <Compile Include="NextcloudTalkAddIn.TalkRoomLifecycle.cs" />
@@ -124,6 +125,8 @@
     <Compile Include="Models\PasswordPolicyInfo.cs" />
     <Compile Include="Models\TalkParticipant.cs" />
     <Compile Include="Models\SeparatePasswordDispatchEntry.cs" />
+    <Compile Include="Models\ComposeLifecycleOrigin.cs" />
+    <Compile Include="Models\ComposeShareCleanupRecord.cs" />
     <Compile Include="Models\TalkAppointmentSyncSnapshot.cs" />
     <Compile Include="Models\TalkRoomLifecycleRecord.cs" />
     <Compile Include="Controllers\TalkDescriptionTemplateController.cs" />
@@ -136,6 +139,7 @@
     <Compile Include="Controllers\OutlookRecipientResolverController.cs" />
     <Compile Include="Controllers\MailComposeSubscriptionRegistryController.cs" />
     <Compile Include="Controllers\ComposeShareLifecycleController.cs" />
+    <Compile Include="Controllers\PendingPasswordDraftController.cs" />
     <Compile Include="Controllers\MailInteropController.cs" />
     <Compile Include="Controllers\OutlookWordEditorContext.cs" />
     <Compile Include="Services\FreeBusyManager.cs" />

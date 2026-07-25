@@ -1385,6 +1385,9 @@
   "sharing_password_mail_notify_success": {
     "message": "Jelszavas e-mail elküldve a $1 címzett(ek)nek."
   },
+  "sharing_password_mail_prepare_failed": {
+    "message": "A jelszót tartalmazó követő e-mailt nem sikerült biztonságosan piszkozatként menteni. A fő üzenet nem lett elküldve."
+  },
   "sharing_password_secrets_fallback_warning": {
     "message": "A Nextcloud Secrets nem érhető el. A jelszó külön, egyszerű szövegű e-mailben lett elküldve."
   },
