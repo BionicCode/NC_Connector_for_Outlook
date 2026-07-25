@@ -28,6 +28,7 @@ namespace NcTalkOutlookAddIn.Settings
             IfbCacheHours = 24;
             IfbPort = DefaultIfbPort;
             IfbPreviousFreeBusyPath = string.Empty;
+            IfbUserDecisionRecorded = false;
             DebugLoggingEnabled = false;
             LogAnonymizationEnabled = true;
             TransportTlsUseSystemDefault = false;
@@ -91,6 +92,8 @@ namespace NcTalkOutlookAddIn.Settings
         public int IfbPort { get; set; }
 
         public string IfbPreviousFreeBusyPath { get; set; }
+
+        public bool IfbUserDecisionRecorded { get; set; }
 
         public bool DebugLoggingEnabled { get; set; }
 

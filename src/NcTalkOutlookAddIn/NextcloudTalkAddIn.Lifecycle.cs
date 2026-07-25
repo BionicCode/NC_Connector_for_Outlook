@@ -41,7 +41,9 @@ namespace NcTalkOutlookAddIn
                 LogSettings("Settings loaded (AuthMode=" + _currentSettings.AuthMode + ", IFB=" + _currentSettings.IfbEnabled + ", IfbPort=" + _currentSettings.IfbPort + ", Debug=" + _currentSettings.DebugLoggingEnabled + ", LogAnonymize=" + _currentSettings.LogAnonymizationEnabled + ").");
             }
 
-            _freeBusyManager = new FreeBusyManager(_settingsStorage.DataDirectory);
+            _freeBusyManager = new FreeBusyManager(
+                _settingsStorage.DataDirectory,
+                outlookProfileName);
             _freeBusyManager.Initialize(_outlookApplication);
             EnsureApplicationHook();
             EnsureInspectorHook();

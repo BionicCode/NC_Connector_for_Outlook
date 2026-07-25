@@ -20,12 +20,17 @@ namespace NcTalkOutlookAddIn.Services
         private const int DefaultPort = 7777;
         private const int MinPort = 1024;
         private const int MaxPort = 49151;
+        private const int MaxConcurrentRequests = 4;
         private const string PrefixPath = "/nc-ifb/";
         private const string LogCategory = LogCategories.Ifb;
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
 
         private readonly object _syncRoot = new object();
         private readonly IfbAddressBookCache _addressBookCache;
+        private readonly SemaphoreSlim _requestSlots =
+            new SemaphoreSlim(
+                MaxConcurrentRequests,
+                MaxConcurrentRequests);
 
         private HttpListener _listener;
         private CancellationTokenSource _cancellation;
@@ -36,6 +41,7 @@ namespace NcTalkOutlookAddIn.Services
         private int _cacheHours = 24;
         private int _listenPort = DefaultPort;
         private string _listenPrefix = BuildPrefix(DefaultPort);
+        private string _requestSecret = string.Empty;
 
         internal FreeBusyServer(IfbAddressBookCache addressBookCache)
         {
@@ -47,13 +53,24 @@ namespace NcTalkOutlookAddIn.Services
             _addressBookCache = addressBookCache;
         }
 
-        internal void UpdateSettings(TalkServiceConfiguration configuration, int defaultDays, int cacheHours)
+        internal void UpdateSettings(
+            TalkServiceConfiguration configuration,
+            int defaultDays,
+            int cacheHours,
+            string requestSecret)
         {
             lock (_syncRoot)
             {
+                if (string.IsNullOrWhiteSpace(requestSecret))
+                {
+                    throw new ArgumentException(
+                        "IFB request secret is required.",
+                        "requestSecret");
+                }
                 _configuration = configuration;
                 _defaultDays = defaultDays > 0 ? defaultDays : 30;
                 _cacheHours = cacheHours >= 1 ? cacheHours : 24;
+                _requestSecret = requestSecret.Trim();
             }
         }
 
@@ -172,7 +189,9 @@ namespace NcTalkOutlookAddIn.Services
                     context = _listener.GetContext();
                     if (context != null)
                     {
-                        DiagnosticsLogger.Log(LogCategory, "HTTP " + context.Request.HttpMethod + " " + context.Request.RawUrl);
+                        DiagnosticsLogger.Log(
+                            LogCategory,
+                            "HTTP " + context.Request.HttpMethod + " request received.");
                     }
                 }
                 catch (HttpListenerException ex)
@@ -192,7 +211,30 @@ namespace NcTalkOutlookAddIn.Services
                 }
                 if (context != null)
                 {
-                    Task.Run(() => HandleRequest(context), token);
+                    if (!_requestSlots.Wait(0))
+                    {
+                        DiagnosticsLogger.Log(
+                            LogCategory,
+                            "IFB request rejected because the concurrency limit was reached.");
+                        WriteError(
+                            context,
+                            (HttpStatusCode)429,
+                            "Too many concurrent requests.");
+                        continue;
+                    }
+
+                    Task.Run(
+                        () =>
+                        {
+                            try
+                            {
+                                HandleRequest(context);
+                            }
+                            finally
+                            {
+                                _requestSlots.Release();
+                            }
+                        });
                 }
             }
         }
@@ -208,15 +250,15 @@ namespace NcTalkOutlookAddIn.Services
                     return;
                 }
                 string path = context.Request.Url.AbsolutePath ?? string.Empty;
-                if (!path.StartsWith("/nc-ifb/freebusy/", StringComparison.OrdinalIgnoreCase) ||
-                    !path.EndsWith(".vfb", StringComparison.OrdinalIgnoreCase))
+                string namePart;
+                if (!TryParseAuthorizedEmailPath(
+                        path,
+                        out namePart))
                 {
-                    DiagnosticsLogger.Log(LogCategory, "Unsupported path: " + path);
+                    DiagnosticsLogger.Log(LogCategory, "Unsupported or unauthorized IFB request path.");
                     WriteError(context, HttpStatusCode.NotFound, "Unsupported path.");
                     return;
                 }
-                string namePart = path.Substring("/nc-ifb/freebusy/".Length);
-                namePart = namePart.Substring(0, namePart.Length - ".vfb".Length);
                 string email = Uri.UnescapeDataString(namePart ?? string.Empty).Trim().ToLowerInvariant();
                 if (string.IsNullOrEmpty(email))
                 {
@@ -331,6 +373,66 @@ namespace NcTalkOutlookAddIn.Services
                     DiagnosticsLogger.LogException(LogCategory, "Failed to close response output stream.", ex);
                 }
             }
+        }
+
+        internal bool TryParseAuthorizedEmailPath(
+            string path,
+            out string encodedEmail)
+        {
+            encodedEmail = string.Empty;
+            string[] segments = (path ?? string.Empty).Split(
+                new[] { '/' },
+                StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length != 4
+                || !string.Equals(
+                    segments[0],
+                    "nc-ifb",
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(
+                    segments[2],
+                    "freebusy",
+                    StringComparison.OrdinalIgnoreCase)
+                || !segments[3].EndsWith(
+                    ".vfb",
+                    StringComparison.OrdinalIgnoreCase)
+                || !SecretMatches(segments[1]))
+            {
+                return false;
+            }
+
+            encodedEmail = segments[3].Substring(
+                0,
+                segments[3].Length - ".vfb".Length);
+            return true;
+        }
+
+        private bool SecretMatches(string candidate)
+        {
+            string expected;
+            lock (_syncRoot)
+            {
+                expected = _requestSecret ?? string.Empty;
+            }
+            if (expected.Length == 0 || candidate == null)
+            {
+                return false;
+            }
+
+            int difference = expected.Length ^ candidate.Length;
+            int length = Math.Max(
+                expected.Length,
+                candidate.Length);
+            for (int i = 0; i < length; i++)
+            {
+                difference |=
+                    (i < expected.Length
+                        ? expected[i]
+                        : '\0')
+                    ^ (i < candidate.Length
+                        ? candidate[i]
+                        : '\0');
+            }
+            return difference == 0;
         }
 
         private string RequestFreeBusyFromCalendar(string uid, int days)

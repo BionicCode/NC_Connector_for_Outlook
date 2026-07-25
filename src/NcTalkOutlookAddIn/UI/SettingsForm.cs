@@ -1313,7 +1313,7 @@ namespace NcTalkOutlookAddIn.UI
             try
             {
                 _initialIfbEnabled = Result.IfbEnabled;
-                _ifbDefaultApplied = _initialIfbEnabled || !string.IsNullOrEmpty(Result.IfbPreviousFreeBusyPath);
+                _ifbDefaultApplied = _initialIfbEnabled || Result.IfbUserDecisionRecorded;
                 _serverUrlTextBox.Text = Result.ManagedNextcloudUrlLocked ? Result.ManagedNextcloudUrl : Result.ServerUrl;
                 _usernameTextBox.Text = Result.Username;
                 _appPasswordTextBox.Text = Result.AppPassword;
@@ -1443,6 +1443,7 @@ namespace NcTalkOutlookAddIn.UI
             Result.AppPassword = _appPasswordTextBox.Text;
             Result.AuthMode = _loginFlowRadio.Checked ? AuthenticationMode.LoginFlow : AuthenticationMode.Manual;
             Result.IfbEnabled = _ifbEnabledCheckBox.Checked;
+            Result.IfbUserDecisionRecorded = _ifbDefaultApplied;
             Result.IfbDays = ParseComboValue(_ifbDaysCombo, 30);
             Result.IfbPort = AddinSettings.NormalizeIfbPort((int)_ifbPortUpDown.Value);
             Result.IfbCacheHours = ParseComboValue(_ifbCacheHoursCombo, 24);

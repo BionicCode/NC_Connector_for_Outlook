@@ -134,6 +134,9 @@
     <Compile Include="Services\FreeBusyManager.cs" />
     <Compile Include="Services\FreeBusyServer.cs" />
     <Compile Include="Services\IfbAddressBookCache.cs" />
+    <Compile Include="Services\IfbRegistryOwnershipManager.cs" />
+    <Compile Include="Services\IfbRegistryStateStore.cs" />
+    <Compile Include="Services\DurableFileReplace.cs" />
     <Compile Include="Services\TalkLoginFlowService.cs" />
     <Compile Include="Services\TalkServiceConfiguration.cs" />
     <Compile Include="Services\TalkServiceException.cs" />

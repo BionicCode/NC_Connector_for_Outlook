@@ -609,7 +609,14 @@ namespace NcTalkOutlookAddIn
             try
             {
                 LogCore("Applying IFB (Enabled=" + _currentSettings.IfbEnabled + ", Days=" + _currentSettings.IfbDays + ", Port=" + _currentSettings.IfbPort + ", CacheHours=" + _currentSettings.IfbCacheHours + ").");
+                string legacyFreeBusyPath = _currentSettings.IfbPreviousFreeBusyPath;
                 _freeBusyManager.ApplySettings(_currentSettings);
+                if (!string.IsNullOrWhiteSpace(legacyFreeBusyPath)
+                    && string.IsNullOrWhiteSpace(_currentSettings.IfbPreviousFreeBusyPath)
+                    && _settingsStorage != null)
+                {
+                    _settingsStorage.Save(_currentSettings);
+                }
             }
             catch (Exception ex)
             {
