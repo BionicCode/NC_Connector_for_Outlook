@@ -206,7 +206,8 @@ internal static class NextcloudUserIdContractTests
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\NextcloudUserIdentityService.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\TalkServiceConfiguration.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\TalkServiceException.cs"),
-        (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\NcJson.cs")
+        (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\NcJson.cs"),
+        (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\NextcloudUriValidator.cs")
     )
     & $csc /nologo /target:exe "/out:$exe" /reference:System.dll /reference:System.Core.dll /reference:System.Web.Extensions.dll @sources
     if ($LASTEXITCODE -ne 0) {

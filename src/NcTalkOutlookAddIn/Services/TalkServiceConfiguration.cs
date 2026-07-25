@@ -3,6 +3,7 @@
 // See LICENSE.txt for details.
 
 using System;
+using NcTalkOutlookAddIn.Utilities;
 
 namespace NcTalkOutlookAddIn.Services
 {
@@ -20,29 +21,18 @@ namespace NcTalkOutlookAddIn.Services
             AppPassword = appPassword ?? string.Empty;
         }
 
-                // Removes redundant slashes and returns a canonical base URL.
+        // Returns a canonical HTTPS base URL or an empty value for an untrusted URL.
         public string GetNormalizedBaseUrl()
         {
-            var trimmed = (BaseUrl ?? string.Empty).Trim();
-            if (trimmed.Length == 0)
-            {
-                return string.Empty;
-            }
-            if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-                && !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                trimmed = "https://" + trimmed;
-            }
-            while (trimmed.EndsWith("/", StringComparison.Ordinal))
-            {
-                trimmed = trimmed.Substring(0, trimmed.Length - 1);
-            }
-            return trimmed;
+            string normalized;
+            return NextcloudUriValidator.TryNormalizeBaseUrl(BaseUrl, out normalized)
+                ? normalized
+                : string.Empty;
         }
 
         public bool IsComplete()
         {
-            return !string.IsNullOrWhiteSpace(BaseUrl)
+            return !string.IsNullOrWhiteSpace(GetNormalizedBaseUrl())
                    && !string.IsNullOrWhiteSpace(Username)
                    && !string.IsNullOrWhiteSpace(AppPassword);
         }

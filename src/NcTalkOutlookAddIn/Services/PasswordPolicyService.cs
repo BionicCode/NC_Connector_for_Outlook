@@ -156,30 +156,13 @@ namespace NcTalkOutlookAddIn.Services
 
         private static string ResolvePolicyUrl(string rawUrl, string baseUrl)
         {
-            string trimmed = rawUrl == null ? string.Empty : rawUrl.Trim();
-            if (string.IsNullOrWhiteSpace(trimmed))
+            string resolved;
+            if (NextcloudUriValidator.TryResolveSameOriginHttpsUrl(rawUrl, baseUrl, out resolved))
             {
-                return null;
+                return resolved;
             }
-            try
-            {
-                Uri absoluteUri;
-                if (Uri.TryCreate(trimmed, UriKind.Absolute, out absoluteUri))
-                {
-                    return absoluteUri.ToString();
-                }
 
-                Uri baseUri;
-                if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.TryCreate(baseUrl, UriKind.Absolute, out baseUri))
-                {
-                    Uri resolved = new Uri(baseUri, trimmed);
-                    return resolved.ToString();
-                }
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLogger.LogException(LogCategories.Api, "Password policy URL normalization failed.", ex);
-            }
+            DiagnosticsLogger.LogApi("Password policy URL rejected because it is not HTTPS on the configured Nextcloud origin.");
             return null;
         }
 
