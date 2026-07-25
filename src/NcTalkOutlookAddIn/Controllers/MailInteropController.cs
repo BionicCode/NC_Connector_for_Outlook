@@ -3,6 +3,7 @@
 // See LICENSE.txt for details.
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -2291,6 +2292,7 @@ namespace NcTalkOutlookAddIn.Controllers
             object content = null;
             object tailRange = null;
             object paragraphs = null;
+            var failedBorderIndexes = new HashSet<int>();
             try
             {
                 content = wordEditor.GetType().InvokeMember("Content", BindingFlags.GetProperty, null, wordEditor, null);
@@ -2359,7 +2361,9 @@ namespace NcTalkOutlookAddIn.Controllers
                             continue;
                         }
 
-                        if (ParagraphHasVisibleBorder(paragraph))
+                        if (ParagraphHasVisibleBorder(
+                            paragraph,
+                            failedBorderIndexes))
                         {
                             separatorStart = Math.Max(searchStart, paragraphStart);
                             return true;
@@ -2381,13 +2385,26 @@ namespace NcTalkOutlookAddIn.Controllers
             }
             finally
             {
+                if (DiagnosticsLogger.IsEnabled && failedBorderIndexes.Count > 0)
+                {
+                    int[] indexes = new int[failedBorderIndexes.Count];
+                    failedBorderIndexes.CopyTo(indexes);
+                    Array.Sort(indexes);
+                    DiagnosticsLogger.Log(
+                        LogCategories.Core,
+                        "Inline reply border lookup failed for indexes (indexes="
+                        + string.Join(",", Array.ConvertAll(indexes, value => value.ToString(CultureInfo.InvariantCulture)))
+                        + ").");
+                }
                 ComInteropScope.TryRelease(paragraphs, LogCategories.Core, "Failed to release inline quote separator paragraphs COM object.");
                 ComInteropScope.TryRelease(tailRange, LogCategories.Core, "Failed to release inline quote separator tail range COM object.");
                 ComInteropScope.TryRelease(content, LogCategories.Core, "Failed to release inline quote separator content COM object.");
             }
         }
 
-        private static bool ParagraphHasVisibleBorder(object paragraph)
+        private static bool ParagraphHasVisibleBorder(
+            object paragraph,
+            HashSet<int> unavailableIndexes)
         {
             if (paragraph == null)
             {
@@ -2403,9 +2420,9 @@ namespace NcTalkOutlookAddIn.Controllers
                     return false;
                 }
 
-                return BorderAtIndexIsVisible(borders, -1)
-                       || BorderAtIndexIsVisible(borders, -3)
-                       || BorderAtIndexIsVisible(borders, -5);
+                return BorderAtIndexIsVisible(borders, -1, unavailableIndexes)
+                       || BorderAtIndexIsVisible(borders, -3, unavailableIndexes)
+                       || BorderAtIndexIsVisible(borders, -5, unavailableIndexes);
             }
             catch (Exception ex)
             {
@@ -2418,7 +2435,10 @@ namespace NcTalkOutlookAddIn.Controllers
             }
         }
 
-        private static bool BorderAtIndexIsVisible(object borders, int index)
+        private static bool BorderAtIndexIsVisible(
+            object borders,
+            int index,
+            HashSet<int> failedIndexes)
         {
             object border = null;
             try
@@ -2435,17 +2455,11 @@ namespace NcTalkOutlookAddIn.Controllers
                        && int.TryParse(Convert.ToString(lineStyle, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out value)
                        && value != 0;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                if (DiagnosticsLogger.IsEnabled)
+                if (failedIndexes != null)
                 {
-                    DiagnosticsLogger.Log(
-                        LogCategories.Core,
-                        "Inline reply border lookup was unavailable (index="
-                        + index.ToString(CultureInfo.InvariantCulture)
-                        + ", errorType="
-                        + ex.GetType().Name
-                        + ").");
+                    failedIndexes.Add(index);
                 }
                 return false;
             }
