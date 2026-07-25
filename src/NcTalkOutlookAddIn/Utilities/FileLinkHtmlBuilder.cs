@@ -124,7 +124,16 @@ namespace NcTalkOutlookAddIn.Utilities
             }
             if (result.ExpireDate.HasValue)
             {
-                AppendRow(builder, expireLabel, HttpUtility.HtmlEncode(result.ExpireDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+                string expirationDateText =
+                    result.ExpireDate.Value.ToString(
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture);
+
+                AppendRow(
+                    builder,
+                    expireLabel,
+                    HtmlNoBreakEncoder.EncodeDateTime(
+                        expirationDateText));
             }
             if (!attachmentMode)
             {
@@ -453,11 +462,11 @@ namespace NcTalkOutlookAddIn.Utilities
                 attachmentMode,
                 HttpUtility.HtmlEncode(values.LinkUrl ?? string.Empty),
                 passwordReplacement,
-                HttpUtility.HtmlEncode(values.ExpirationDate),
+                HtmlNoBreakEncoder.EncodeDateTime(values.ExpirationDate),
                 values.Rights,
                 HttpUtility.HtmlEncode(values.Note),
                 HttpUtility.HtmlEncode(values.LinkIntro),
-                HttpUtility.HtmlEncode(values.LinkLabel));
+                HtmlNoBreakEncoder.EncodeFieldLabel(values.LinkLabel));
 
             string sanitized = HtmlTemplateSanitizer.SanitizeShareTemplateHtml(html);
             if (string.IsNullOrWhiteSpace(sanitized))
@@ -763,11 +772,13 @@ namespace NcTalkOutlookAddIn.Utilities
                 // Adds a table row with label and content.
         private static void AppendRow(StringBuilder builder, string label, string valueHtml)
         {
+            string encodedLabel = HtmlNoBreakEncoder.EncodeFieldLabel(label ?? string.Empty);
+
             builder.AppendLine("<tr>");
             builder.AppendFormat(
                 CultureInfo.InvariantCulture,
                 "<th style=\"text-align:left;width:12ch;vertical-align:top;padding:6px 10px 6px 0;\">{0}</th>",
-                HttpUtility.HtmlEncode(label));
+                encodedLabel);
             builder.Append("<td style=\"padding:6px 0;max-width:50ch;word-break:break-word;\">");
             builder.Append(valueHtml ?? string.Empty);
             builder.Append("</td>");

@@ -1,237 +1,238 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
-  <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{F5F857C5-4103-445B-B121-5E0CF10D8D57}</ProjectGuid>
-    <OutputType>Library</OutputType>
-    <RootNamespace>NcTalkOutlookAddIn</RootNamespace>
-    <AssemblyName>NcTalkOutlookAddIn</AssemblyName>
-    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
-    <FileAlignment>512</FileAlignment>
-    <RegisterForComInterop>false</RegisterForComInterop>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <ItemGroup>
-    <Reference Include="Extensibility, Version=7.0.3300.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-      <EmbedInteropTypes>true</EmbedInteropTypes>
-    </Reference>
-    <Reference Include="Microsoft.Office.Interop.Outlook, Version=15.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c">
-      <EmbedInteropTypes>true</EmbedInteropTypes>
-    </Reference>
-    <Reference Include="office, Version=15.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c">
-      <EmbedInteropTypes>true</EmbedInteropTypes>
-    </Reference>
-    <Reference Include="stdole, Version=7.0.3300.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" />
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Drawing" />
-    <Reference Include="System.Windows.Forms" />
-    <Reference Include="System.Xml" />
-    <Reference Include="System.Security" />
-    <Reference Include="System.Web" />
-    <Reference Include="System.Web.Extensions" />
-    <Reference Include="AngleSharp">
-      <HintPath>vendor\htmlsanitizer\AngleSharp.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="AngleSharp.Css">
-      <HintPath>vendor\htmlsanitizer\AngleSharp.Css.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="HtmlSanitizer">
-      <HintPath>vendor\htmlsanitizer\HtmlSanitizer.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System.Buffers">
-      <HintPath>vendor\htmlsanitizer\System.Buffers.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System.Collections.Immutable">
-      <HintPath>vendor\htmlsanitizer\System.Collections.Immutable.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System.Memory">
-      <HintPath>vendor\htmlsanitizer\System.Memory.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System.Runtime.CompilerServices.Unsafe">
-      <HintPath>vendor\htmlsanitizer\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System.Text.Encoding.CodePages">
-      <HintPath>vendor\htmlsanitizer\System.Text.Encoding.CodePages.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="NextcloudTalkAddIn.cs" />
-    <Compile Include="NextcloudTalkAddIn.Hooks.cs" />
-    <Compile Include="NextcloudTalkAddIn.Logging.cs" />
-    <Compile Include="NextcloudTalkAddIn.Lifecycle.cs" />
-    <Compile Include="NextcloudTalkAddIn.PolicyTemplates.cs" />
-    <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.cs" />
-    <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.AttachmentFlow.cs" />
-    <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.Signature.cs" />
-    <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs" />
-    <Compile Include="NextcloudTalkAddIn.AppointmentSubscription.cs" />
-    <Compile Include="NextcloudTalkAddIn.SubscriptionEnsure.cs" />
-    <Compile Include="Settings\AddinSettings.cs" />
-    <Compile Include="Settings\AuthenticationMode.cs" />
-    <Compile Include="Settings\ManagedSetupPolicy.cs" />
-    <Compile Include="Settings\SettingsStorage.cs" />
-    <Compile Include="Models\TalkRoomType.cs" />
-    <Compile Include="Models\TalkRoomRequest.cs" />
-    <Compile Include="Models\TalkRoomCreationResult.cs" />
-    <Compile Include="Models\FileLinkPermissions.cs" />
-    <Compile Include="Models\FileLinkSelection.cs" />
-    <Compile Include="Models\FileLinkRequest.cs" />
-    <Compile Include="Models\FileLinkResult.cs" />
-    <Compile Include="Models\FileLinkWizardLaunchOptions.cs" />
-    <Compile Include="Models\FileLinkUploadStatus.cs" />
-    <Compile Include="Models\FileLinkUploadItemProgress.cs" />
-    <Compile Include="Models\FileLinkUploadPhase.cs" />
-    <Compile Include="Models\FileLinkUploadPhaseProgress.cs" />
-    <Compile Include="Models\NextcloudCapabilitiesSnapshot.cs" />
-    <Compile Include="Models\BackendPolicyStatus.cs" />
-    <Compile Include="Models\AttachmentLinkTargetPolicy.cs" />
-    <Compile Include="Models\EmailSignaturePolicy.cs" />
-    <Compile Include="Models\SharePasswordDeliveryMode.cs" />
-    <Compile Include="Models\SharePasswordDeliveryPolicy.cs" />
-    <Compile Include="Models\SecretsLinkResult.cs" />
-    <Compile Include="Models\UpdateCheckResult.cs" />
-    <Compile Include="Models\NextcloudUser.cs" />
-    <Compile Include="Models\PasswordPolicyInfo.cs" />
-    <Compile Include="Models\TalkParticipant.cs" />
-    <Compile Include="Models\SeparatePasswordDispatchEntry.cs" />
-    <Compile Include="Controllers\TalkDescriptionTemplateController.cs" />
-    <Compile Include="Controllers\TalkAppointmentController.cs" />
-    <Compile Include="Controllers\SettingsWorkflowController.cs" />
-    <Compile Include="Controllers\FileLinkLaunchController.cs" />
-    <Compile Include="Controllers\TalkRibbonController.cs" />
-    <Compile Include="Controllers\OutlookRecipientResolverController.cs" />
-    <Compile Include="Controllers\MailComposeSubscriptionRegistryController.cs" />
-    <Compile Include="Controllers\ComposeShareLifecycleController.cs" />
-    <Compile Include="Controllers\MailInteropController.cs" />
-    <Compile Include="Controllers\OutlookWordEditorContext.cs" />
-    <Compile Include="Services\FreeBusyManager.cs" />
-    <Compile Include="Services\FreeBusyServer.cs" />
-    <Compile Include="Services\IfbAddressBookCache.cs" />
-    <Compile Include="Services\TalkLoginFlowService.cs" />
-    <Compile Include="Services\TalkServiceConfiguration.cs" />
-    <Compile Include="Services\TalkServiceException.cs" />
-    <Compile Include="Services\NcHttpClient.cs" />
-    <Compile Include="Services\NextcloudCapabilitiesService.cs" />
-    <Compile Include="Services\NextcloudUserIdentityService.cs" />
-    <Compile Include="Services\TalkService.cs" />
-    <Compile Include="Services\FileLinkDuplicateInfo.cs" />
-    <Compile Include="Services\FileLinkDavClient.cs" />
-    <Compile Include="Services\FileLinkDavClient.Probes.cs" />
-    <Compile Include="Services\FileLinkDavClient.Requests.cs" />
-    <Compile Include="Services\FileLinkUploadContext.cs" />
-    <Compile Include="Services\FileLinkUploadPlan.cs" />
-    <Compile Include="Services\FileLinkSelectionScanner.cs" />
-    <Compile Include="Services\FileLinkUploadPlanner.cs" />
-    <Compile Include="Services\FileLinkUploadProgress.cs" />
-    <Compile Include="Services\FileLinkShareClient.cs" />
-    <Compile Include="Services\FileLinkShareClient.Recovery.cs" />
-    <Compile Include="Services\FileLinkSourceFile.cs" />
-    <Compile Include="Services\FileLinkBulkUploader.cs" />
-    <Compile Include="Services\FileLinkDirectUploader.cs" />
-    <Compile Include="Services\FileLinkChunkUploader.cs" />
-    <Compile Include="Services\FileLinkTransferService.cs" />
-    <Compile Include="Services\FileLinkService.cs" />
-    <Compile Include="Services\BackendPolicyService.cs" />
-    <Compile Include="Services\EmailSignaturePolicyService.cs" />
-    <Compile Include="Services\SecretsService.cs" />
-    <Compile Include="Services\UpdateCheckService.cs" />
-    <Compile Include="Services\OutlookAttachmentAutomationGuardService.cs" />
-    <Compile Include="Services\PasswordPolicyService.cs" />
-    <Compile Include="UI\SettingsForm.cs" />
-    <Compile Include="UI\SettingsForm.Language.cs" />
-    <Compile Include="UI\SettingsTabControl.cs" />
-    <Compile Include="UI\ScaledForm.cs" />
-    <Compile Include="UI\TalkLinkForm.cs" />
-    <Compile Include="UI\TalkLinkForm.Moderator.cs" />
-    <Compile Include="UI\ComposeAttachmentPromptForm.cs" />
-    <Compile Include="UI\FileLinkWizardForm.cs" />
-    <Compile Include="UI\FileLinkWizardForm.DragDrop.cs" />
-    <Compile Include="UI\FileLinkWizardForm.Duplicates.cs" />
-    <Compile Include="UI\FileLinkWizardForm.Files.cs" />
-    <Compile Include="UI\FileLinkWizardForm.Layout.cs" />
-    <Compile Include="UI\FileLinkWizardForm.Policy.cs" />
-    <Compile Include="UI\FileLinkWizardForm.Upload.cs" />
-    <Compile Include="UI\FileLinkWizardForm.UploadProgress.cs" />
-    <Compile Include="UI\SharePasswordDeliveryModeComboHelper.cs" />
-    <Compile Include="Utilities\DiagnosticsLogger.cs" />
-    <Compile Include="Utilities\FooterButtonLayoutHelper.cs" />
-    <Compile Include="Utilities\LogCategories.cs" />
-    <Compile Include="Utilities\AddinVersionInfo.cs" />
-    <Compile Include="Utilities\BrowserLauncher.cs" />
-    <Compile Include="Utilities\HttpAuthUtilities.cs" />
-    <Compile Include="Utilities\BrandingAssets.cs" />
-    <Compile Include="Utilities\FileLinkPath.cs" />
-    <Compile Include="Utilities\FileLinkUploadPolicy.cs" />
-    <Compile Include="Utilities\NextcloudVersionHelper.cs" />
-    <Compile Include="Utilities\Strings.cs" />
-    <Compile Include="Utilities\SizeFormatting.cs" />
-    <Compile Include="Utilities\PasswordGenerator.cs" />
-    <Compile Include="Utilities\PasswordGenerationHelper.cs" />
-    <Compile Include="Utilities\ParallelExecution.cs" />
-    <Compile Include="Utilities\PolicyUiHelper.cs" />
-    <Compile Include="Utilities\SecretsCrypto.cs" />
-    <Compile Include="Utilities\TimeUtilities.cs" />
-    <Compile Include="Utilities\DpiScaling.cs" />
-    <Compile Include="Utilities\UiThemeManager.cs" />
-    <Compile Include="Utilities\DisabledControlTooltipHintHelper.cs" />
-    <Compile Include="Utilities\EmailSignatureSlotPlacementPolicy.cs" />
-    <Compile Include="Utilities\HttpFailureDiagnostics.cs" />
-    <Compile Include="Utilities\NcJson.cs" />
-    <Compile Include="Utilities\FileLinkHtmlBuilder.cs" />
-    <Compile Include="Utilities\HtmlToPlainTextConverter.cs" />
-    <Compile Include="Utilities\HtmlTemplateSanitizer.cs" />
-    <Compile Include="Utilities\PlainTextUtilities.cs" />
-    <Compile Include="Utilities\DeferredAppointmentEnsureState.cs" />
-    <Compile Include="Utilities\PictureConverter.cs" />
-    <Compile Include="Utilities\AppDataPaths.cs" />
-    <Compile Include="Utilities\ComInteropScope.cs" />
-    <Compile Include="Utilities\NativeWindowOwner.cs" />
-    <Compile Include="Utilities\OutlookUiSynchronizationContext.cs" />
-    <Compile Include="Utilities\WaitCursorScope.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="UI\BrandedHeader.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\app.png" />
-    <EmbeddedResource Include="Resources\header-solid-blue-164x48.png" />
-    <EmbeddedResource Include="Resources\_locales\**\messages.json" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="app.config" />
-    <Content Include="LICENSE.txt">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\..\VENDOR.md">
-      <Link>VENDOR.md</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+    <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+    <PropertyGroup>
+        <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+        <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+        <ProjectGuid>{F5F857C5-4103-445B-B121-5E0CF10D8D57}</ProjectGuid>
+        <OutputType>Library</OutputType>
+        <RootNamespace>NcTalkOutlookAddIn</RootNamespace>
+        <AssemblyName>NcTalkOutlookAddIn</AssemblyName>
+        <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+        <FileAlignment>512</FileAlignment>
+        <RegisterForComInterop>false</RegisterForComInterop>
+    </PropertyGroup>
+    <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+        <DebugSymbols>true</DebugSymbols>
+        <DebugType>full</DebugType>
+        <Optimize>false</Optimize>
+        <OutputPath>bin\Debug\</OutputPath>
+        <DefineConstants>DEBUG;TRACE</DefineConstants>
+        <ErrorReport>prompt</ErrorReport>
+        <WarningLevel>4</WarningLevel>
+    </PropertyGroup>
+    <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+        <DebugType>pdbonly</DebugType>
+        <Optimize>true</Optimize>
+        <OutputPath>bin\Release\</OutputPath>
+        <DefineConstants>TRACE</DefineConstants>
+        <ErrorReport>prompt</ErrorReport>
+        <WarningLevel>4</WarningLevel>
+    </PropertyGroup>
+    <ItemGroup>
+        <Reference Include="Extensibility, Version=7.0.3300.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+            <EmbedInteropTypes>true</EmbedInteropTypes>
+        </Reference>
+        <Reference Include="Microsoft.Office.Interop.Outlook, Version=15.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c">
+            <EmbedInteropTypes>true</EmbedInteropTypes>
+        </Reference>
+        <Reference Include="office, Version=15.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c">
+            <EmbedInteropTypes>true</EmbedInteropTypes>
+        </Reference>
+        <Reference Include="stdole, Version=7.0.3300.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" />
+        <Reference Include="System" />
+        <Reference Include="System.Core" />
+        <Reference Include="System.Drawing" />
+        <Reference Include="System.Windows.Forms" />
+        <Reference Include="System.Xml" />
+        <Reference Include="System.Security" />
+        <Reference Include="System.Web" />
+        <Reference Include="System.Web.Extensions" />
+        <Reference Include="AngleSharp">
+            <HintPath>vendor\htmlsanitizer\AngleSharp.dll</HintPath>
+            <Private>True</Private>
+        </Reference>
+        <Reference Include="AngleSharp.Css">
+            <HintPath>vendor\htmlsanitizer\AngleSharp.Css.dll</HintPath>
+            <Private>True</Private>
+        </Reference>
+        <Reference Include="HtmlSanitizer">
+            <HintPath>vendor\htmlsanitizer\HtmlSanitizer.dll</HintPath>
+            <Private>True</Private>
+        </Reference>
+        <Reference Include="System.Buffers">
+            <HintPath>vendor\htmlsanitizer\System.Buffers.dll</HintPath>
+            <Private>True</Private>
+        </Reference>
+        <Reference Include="System.Collections.Immutable">
+            <HintPath>vendor\htmlsanitizer\System.Collections.Immutable.dll</HintPath>
+            <Private>True</Private>
+        </Reference>
+        <Reference Include="System.Memory">
+            <HintPath>vendor\htmlsanitizer\System.Memory.dll</HintPath>
+            <Private>True</Private>
+        </Reference>
+        <Reference Include="System.Runtime.CompilerServices.Unsafe">
+            <HintPath>vendor\htmlsanitizer\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+            <Private>True</Private>
+        </Reference>
+        <Reference Include="System.Text.Encoding.CodePages">
+            <HintPath>vendor\htmlsanitizer\System.Text.Encoding.CodePages.dll</HintPath>
+            <Private>True</Private>
+        </Reference>
+    </ItemGroup>
+    <ItemGroup>
+        <Compile Include="NextcloudTalkAddIn.cs" />
+        <Compile Include="NextcloudTalkAddIn.Hooks.cs" />
+        <Compile Include="NextcloudTalkAddIn.Logging.cs" />
+        <Compile Include="NextcloudTalkAddIn.Lifecycle.cs" />
+        <Compile Include="NextcloudTalkAddIn.PolicyTemplates.cs" />
+        <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.cs" />
+        <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.AttachmentFlow.cs" />
+        <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.Signature.cs" />
+        <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs" />
+        <Compile Include="NextcloudTalkAddIn.AppointmentSubscription.cs" />
+        <Compile Include="NextcloudTalkAddIn.SubscriptionEnsure.cs" />
+        <Compile Include="Settings\AddinSettings.cs" />
+        <Compile Include="Settings\AuthenticationMode.cs" />
+        <Compile Include="Settings\ManagedSetupPolicy.cs" />
+        <Compile Include="Settings\SettingsStorage.cs" />
+        <Compile Include="Models\TalkRoomType.cs" />
+        <Compile Include="Models\TalkRoomRequest.cs" />
+        <Compile Include="Models\TalkRoomCreationResult.cs" />
+        <Compile Include="Models\FileLinkPermissions.cs" />
+        <Compile Include="Models\FileLinkSelection.cs" />
+        <Compile Include="Models\FileLinkRequest.cs" />
+        <Compile Include="Models\FileLinkResult.cs" />
+        <Compile Include="Models\FileLinkWizardLaunchOptions.cs" />
+        <Compile Include="Models\FileLinkUploadStatus.cs" />
+        <Compile Include="Models\FileLinkUploadItemProgress.cs" />
+        <Compile Include="Models\FileLinkUploadPhase.cs" />
+        <Compile Include="Models\FileLinkUploadPhaseProgress.cs" />
+        <Compile Include="Models\NextcloudCapabilitiesSnapshot.cs" />
+        <Compile Include="Models\BackendPolicyStatus.cs" />
+        <Compile Include="Models\AttachmentLinkTargetPolicy.cs" />
+        <Compile Include="Models\EmailSignaturePolicy.cs" />
+        <Compile Include="Models\SharePasswordDeliveryMode.cs" />
+        <Compile Include="Models\SharePasswordDeliveryPolicy.cs" />
+        <Compile Include="Models\SecretsLinkResult.cs" />
+        <Compile Include="Models\UpdateCheckResult.cs" />
+        <Compile Include="Models\NextcloudUser.cs" />
+        <Compile Include="Models\PasswordPolicyInfo.cs" />
+        <Compile Include="Models\TalkParticipant.cs" />
+        <Compile Include="Models\SeparatePasswordDispatchEntry.cs" />
+        <Compile Include="Controllers\TalkDescriptionTemplateController.cs" />
+        <Compile Include="Controllers\TalkAppointmentController.cs" />
+        <Compile Include="Controllers\SettingsWorkflowController.cs" />
+        <Compile Include="Controllers\FileLinkLaunchController.cs" />
+        <Compile Include="Controllers\TalkRibbonController.cs" />
+        <Compile Include="Controllers\OutlookRecipientResolverController.cs" />
+        <Compile Include="Controllers\MailComposeSubscriptionRegistryController.cs" />
+        <Compile Include="Controllers\ComposeShareLifecycleController.cs" />
+        <Compile Include="Controllers\MailInteropController.cs" />
+        <Compile Include="Controllers\OutlookWordEditorContext.cs" />
+        <Compile Include="Services\FreeBusyManager.cs" />
+        <Compile Include="Services\FreeBusyServer.cs" />
+        <Compile Include="Services\IfbAddressBookCache.cs" />
+        <Compile Include="Services\TalkLoginFlowService.cs" />
+        <Compile Include="Services\TalkServiceConfiguration.cs" />
+        <Compile Include="Services\TalkServiceException.cs" />
+        <Compile Include="Services\NcHttpClient.cs" />
+        <Compile Include="Services\NextcloudCapabilitiesService.cs" />
+        <Compile Include="Services\NextcloudUserIdentityService.cs" />
+        <Compile Include="Services\TalkService.cs" />
+        <Compile Include="Services\FileLinkDuplicateInfo.cs" />
+        <Compile Include="Services\FileLinkDavClient.cs" />
+        <Compile Include="Services\FileLinkDavClient.Probes.cs" />
+        <Compile Include="Services\FileLinkDavClient.Requests.cs" />
+        <Compile Include="Services\FileLinkUploadContext.cs" />
+        <Compile Include="Services\FileLinkUploadPlan.cs" />
+        <Compile Include="Services\FileLinkSelectionScanner.cs" />
+        <Compile Include="Services\FileLinkUploadPlanner.cs" />
+        <Compile Include="Services\FileLinkUploadProgress.cs" />
+        <Compile Include="Services\FileLinkShareClient.cs" />
+        <Compile Include="Services\FileLinkShareClient.Recovery.cs" />
+        <Compile Include="Services\FileLinkSourceFile.cs" />
+        <Compile Include="Services\FileLinkBulkUploader.cs" />
+        <Compile Include="Services\FileLinkDirectUploader.cs" />
+        <Compile Include="Services\FileLinkChunkUploader.cs" />
+        <Compile Include="Services\FileLinkTransferService.cs" />
+        <Compile Include="Services\FileLinkService.cs" />
+        <Compile Include="Services\BackendPolicyService.cs" />
+        <Compile Include="Services\EmailSignaturePolicyService.cs" />
+        <Compile Include="Services\SecretsService.cs" />
+        <Compile Include="Services\UpdateCheckService.cs" />
+        <Compile Include="Services\OutlookAttachmentAutomationGuardService.cs" />
+        <Compile Include="Services\PasswordPolicyService.cs" />
+        <Compile Include="UI\SettingsForm.cs" />
+        <Compile Include="UI\SettingsForm.Language.cs" />
+        <Compile Include="UI\SettingsTabControl.cs" />
+        <Compile Include="UI\ScaledForm.cs" />
+        <Compile Include="UI\TalkLinkForm.cs" />
+        <Compile Include="UI\TalkLinkForm.Moderator.cs" />
+        <Compile Include="UI\ComposeAttachmentPromptForm.cs" />
+        <Compile Include="UI\FileLinkWizardForm.cs" />
+        <Compile Include="UI\FileLinkWizardForm.DragDrop.cs" />
+        <Compile Include="UI\FileLinkWizardForm.Duplicates.cs" />
+        <Compile Include="UI\FileLinkWizardForm.Files.cs" />
+        <Compile Include="UI\FileLinkWizardForm.Layout.cs" />
+        <Compile Include="UI\FileLinkWizardForm.Policy.cs" />
+        <Compile Include="UI\FileLinkWizardForm.Upload.cs" />
+        <Compile Include="UI\FileLinkWizardForm.UploadProgress.cs" />
+        <Compile Include="UI\SharePasswordDeliveryModeComboHelper.cs" />
+        <Compile Include="Utilities\HtmlNoBreakEncoder.cs" />
+        <Compile Include="Utilities\DiagnosticsLogger.cs" />
+        <Compile Include="Utilities\FooterButtonLayoutHelper.cs" />
+        <Compile Include="Utilities\LogCategories.cs" />
+        <Compile Include="Utilities\AddinVersionInfo.cs" />
+        <Compile Include="Utilities\BrowserLauncher.cs" />
+        <Compile Include="Utilities\HttpAuthUtilities.cs" />
+        <Compile Include="Utilities\BrandingAssets.cs" />
+        <Compile Include="Utilities\FileLinkPath.cs" />
+        <Compile Include="Utilities\FileLinkUploadPolicy.cs" />
+        <Compile Include="Utilities\NextcloudVersionHelper.cs" />
+        <Compile Include="Utilities\Strings.cs" />
+        <Compile Include="Utilities\SizeFormatting.cs" />
+        <Compile Include="Utilities\PasswordGenerator.cs" />
+        <Compile Include="Utilities\PasswordGenerationHelper.cs" />
+        <Compile Include="Utilities\ParallelExecution.cs" />
+        <Compile Include="Utilities\PolicyUiHelper.cs" />
+        <Compile Include="Utilities\SecretsCrypto.cs" />
+        <Compile Include="Utilities\TimeUtilities.cs" />
+        <Compile Include="Utilities\DpiScaling.cs" />
+        <Compile Include="Utilities\UiThemeManager.cs" />
+        <Compile Include="Utilities\DisabledControlTooltipHintHelper.cs" />
+        <Compile Include="Utilities\EmailSignatureSlotPlacementPolicy.cs" />
+        <Compile Include="Utilities\HttpFailureDiagnostics.cs" />
+        <Compile Include="Utilities\NcJson.cs" />
+        <Compile Include="Utilities\FileLinkHtmlBuilder.cs" />
+        <Compile Include="Utilities\HtmlToPlainTextConverter.cs" />
+        <Compile Include="Utilities\HtmlTemplateSanitizer.cs" />
+        <Compile Include="Utilities\PlainTextUtilities.cs" />
+        <Compile Include="Utilities\DeferredAppointmentEnsureState.cs" />
+        <Compile Include="Utilities\PictureConverter.cs" />
+        <Compile Include="Utilities\AppDataPaths.cs" />
+        <Compile Include="Utilities\ComInteropScope.cs" />
+        <Compile Include="Utilities\NativeWindowOwner.cs" />
+        <Compile Include="Utilities\OutlookUiSynchronizationContext.cs" />
+        <Compile Include="Utilities\WaitCursorScope.cs" />
+        <Compile Include="Properties\AssemblyInfo.cs" />
+        <Compile Include="UI\BrandedHeader.cs" />
+    </ItemGroup>
+    <ItemGroup>
+        <EmbeddedResource Include="Resources\app.png" />
+        <EmbeddedResource Include="Resources\header-solid-blue-164x48.png" />
+        <EmbeddedResource Include="Resources\_locales\**\messages.json" />
+    </ItemGroup>
+    <ItemGroup>
+        <None Include="app.config" />
+        <Content Include="LICENSE.txt">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+        <Content Include="..\..\VENDOR.md">
+            <Link>VENDOR.md</Link>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
+    <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
