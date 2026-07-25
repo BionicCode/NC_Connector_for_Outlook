@@ -6,28 +6,28 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path $ProjectRoot).Path
 $SourceRoot = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn"
 
-$runtimeFiles = Get-ChildItem -Path $SourceRoot -Filter "NextcloudTalkAddIn*.cs"
+$runtimeFiles = @(
+    Get-ChildItem -Path $SourceRoot -Filter "NextcloudTalkAddIn*.cs"
+    Get-ChildItem -Path (Join-Path $SourceRoot "Controllers") -Filter "*Lifecycle*.cs"
+    Get-ChildItem -Path (Join-Path $SourceRoot "Services") -Filter "*Lifecycle*.cs"
+) | Sort-Object FullName -Unique
 if ($runtimeFiles.Count -eq 0) {
     throw "No NextcloudTalkAddIn runtime files found."
 }
 
 $additions = New-Object System.Collections.Generic.List[object]
 $removals = New-Object System.Collections.Generic.List[object]
-$eventPattern = '(?<target>[A-Za-z_][\w\.]*)\.(?<event>\w+)\s*(?<op>\+=|-=)\s*(?<handler>[A-Za-z_]\w+)\s*;'
+$eventPattern = '(?<target>[A-Za-z_][\w\.]*)\.(?<event>\w+)\s*(?<op>\+=|-=)\s*(?<handler>[A-Za-z_][\w\.]*)\s*;'
 
 foreach ($file in $runtimeFiles) {
     $relative = $file.FullName.Substring($ProjectRoot.Length + 1)
-    $lines = Get-Content -Path $file.FullName
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        $line = $lines[$i]
-        $match = [regex]::Match($line, $eventPattern)
-        if (-not $match.Success) {
-            continue
-        }
+    $source = Get-Content -Path $file.FullName -Raw
+    foreach ($match in [regex]::Matches($source, $eventPattern)) {
+        $line = ([regex]::Matches($source.Substring(0, $match.Index), "`n")).Count + 1
 
         $entry = [PSCustomObject]@{
             File = $relative
-            Line = $i + 1
+            Line = $line
             Target = $match.Groups["target"].Value
             Event = $match.Groups["event"].Value
             Handler = $match.Groups["handler"].Value
