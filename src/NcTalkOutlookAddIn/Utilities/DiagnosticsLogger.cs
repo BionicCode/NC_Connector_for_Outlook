@@ -31,10 +31,13 @@ namespace NcTalkOutlookAddIn.Utilities
             "(https?://)[^\\s/@]+:[^\\s/@]+@",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex SecretQueryRegex = new Regex(
-            "([?&](?:access_token|refresh_token|token|password|pass|secret|code|auth|apikey|app_password)=)[^&\\s]+",
+            "([?&](?:access_token|refresh_token|token|room_?token|share_?token|poll_?token|password|app_?password|pass|secret|code|auth|api_?key)=)[^&\\s]+",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex SecretJsonRegex = new Regex(
-            "(\"(?:access_token|refresh_token|token|password|pass|secret|code|auth|apikey|app_password)\"\\s*:\\s*)\"(?:[^\"\\\\]|\\\\.)*\"",
+            "(\"(?:access_token|refresh_token|token|room_?token|share_?token|poll_?token|password|app_?password|pass|secret|code|auth|api_?key)\"\\s*:\\s*)\"(?:[^\"\\\\]|\\\\.)*\"",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex StructuredSecretFieldRegex = new Regex(
+            "(\\b(?:access_token|refresh_token|token|room_?token|share_?token|poll_?token|password|app_?password|pass|secret|code|auth|api_?key)\\b\\s*[=:]\\s*)(?:\"(?:[^\"\\\\]|\\\\.)*\"|'[^']*'|[^\\s,;\\)\\}\\]]+)",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex ShareCallTokenRegex = new Regex(
             "(\\/(?:s|call)\\/)([A-Za-z0-9_-]+)",
@@ -214,7 +217,7 @@ namespace NcTalkOutlookAddIn.Utilities
 
         private static string SanitizeMessage(string message)
         {
-            if (string.IsNullOrEmpty(message) || !_anonymizationEnabled)
+            if (string.IsNullOrEmpty(message))
             {
                 return message ?? string.Empty;
             }
@@ -225,8 +228,13 @@ namespace NcTalkOutlookAddIn.Utilities
                 value = UrlCredentialRegex.Replace(value, "$1<CRED>@");
                 value = SecretQueryRegex.Replace(value, "$1<REDACTED>");
                 value = SecretJsonRegex.Replace(value, "$1\"<REDACTED>\"");
+                value = StructuredSecretFieldRegex.Replace(value, "$1<REDACTED>");
                 value = SecretsShareFragmentRegex.Replace(value, "$1#<REDACTED>");
                 value = ShareCallTokenRegex.Replace(value, "$1<TOKEN>");
+                if (!_anonymizationEnabled)
+                {
+                    return value;
+                }
                 value = DavUserPathRegex.Replace(value, "$1<USER>");
                 value = UserFieldRegex.Replace(value, "$1<REDACTED_USER>");
                 value = JsonUserFieldRegex.Replace(value, "$1<REDACTED_USER>$3");
