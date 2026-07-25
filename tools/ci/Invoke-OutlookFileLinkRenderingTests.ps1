@@ -203,6 +203,124 @@ internal static class OutlookFileLinkRenderingTests
         return count;
     }
 
+    private static bool ContainsCodePoint(string value, char codePoint)
+    {
+        return !string.IsNullOrEmpty(value) && value.IndexOf(codePoint) >= 0;
+    }
+
+    private static int CountCodePoint(string value, char codePoint)
+    {
+        return string.IsNullOrEmpty(value)
+            ? 0
+            : value.Count(character => character == codePoint);
+    }
+
+    private static string NormalizeNoBreakCharacters(string value)
+    {
+        return (value ?? string.Empty)
+            .Replace('\u00A0', ' ')
+            .Replace('\u2011', '-');
+    }
+
+    private static string GetNormalizedVisibleText(string html)
+    {
+        var document = new HtmlParser().ParseDocument(html ?? string.Empty);
+        return NormalizeNoBreakCharacters(document.Body == null ? string.Empty : document.Body.TextContent);
+    }
+
+    private static IElement AssertSingleNoBreakElement(string caseName, string html)
+    {
+        var document = new HtmlParser().ParseDocument(
+            "<!doctype html><html><body>" + (html ?? string.Empty) + "</body></html>");
+        List<IElement> wrappers = document.QuerySelectorAll("nobr").ToList();
+        Check(caseName + " has exactly one no-break wrapper", wrappers.Count == 1, html);
+        Check(
+            caseName + " wrapper is the only top-level element",
+            document.Body != null
+                && document.Body.Children.Count() == 1
+                && string.Equals(document.Body.Children.First().TagName, "nobr", StringComparison.OrdinalIgnoreCase),
+            html);
+        if (wrappers.Count != 1)
+        {
+            return null;
+        }
+
+        IElement wrapper = wrappers[0];
+        StyleEquals(caseName + " wrapper white space", ParseStyle(wrapper), "white-space", "nowrap");
+        return wrapper;
+    }
+
+    private static IElement AssertSingleNoBreakElementByText(
+        string caseName,
+        string html,
+        string expectedVisibleText)
+    {
+        var document = new HtmlParser().ParseDocument(html ?? string.Empty);
+        List<IElement> matches = document.QuerySelectorAll("nobr")
+            .Where(element => string.Equals(
+                NormalizeNoBreakCharacters(element.TextContent),
+                expectedVisibleText,
+                StringComparison.Ordinal))
+            .ToList();
+        Check(
+            caseName + " has exactly one matching no-break element",
+            matches.Count == 1,
+            "count=" + matches.Count + "; html=" + html);
+        return matches.Count == 1 ? matches[0] : null;
+    }
+
+    private static IElement AssertNoBreakFieldLabel(
+        string caseName,
+        string html,
+        string expectedVisibleText)
+    {
+        IElement element = AssertSingleNoBreakElementByText(caseName, html, expectedVisibleText);
+        if (element == null)
+        {
+            return null;
+        }
+
+        string text = element.TextContent;
+        Check(caseName + " uses one non-breaking space", CountCodePoint(text, '\u00A0') == 1, text);
+        Check(caseName + " contains no ordinary space", !ContainsCodePoint(text, ' '), text);
+        Check(
+            caseName + " preserves visible text",
+            string.Equals(NormalizeNoBreakCharacters(text), expectedVisibleText, StringComparison.Ordinal),
+            text);
+        return element;
+    }
+
+    private static IElement AssertNoBreakDate(
+        string caseName,
+        string html,
+        string expectedVisibleText)
+    {
+        IElement element = AssertSingleNoBreakElementByText(caseName, html, expectedVisibleText);
+        if (element == null)
+        {
+            return null;
+        }
+
+        string text = element.TextContent;
+        Check(caseName + " uses two non-breaking hyphens", CountCodePoint(text, '\u2011') == 2, text);
+        Check(caseName + " contains no ASCII hyphen", !ContainsCodePoint(text, '-'), text);
+        Check(
+            caseName + " preserves visible date",
+            string.Equals(text.Replace('\u2011', '-'), expectedVisibleText, StringComparison.Ordinal),
+            text);
+        return element;
+    }
+
+    private static void AssertPlainTextNoBreakContract(string caseName, string plainText)
+    {
+        Check(caseName + " keeps ASCII-hyphen date", plainText.Contains("2026-08-01"), plainText);
+        Check(caseName + " keeps ordinary-space label", plainText.Contains("Nextcloud link"), plainText);
+        Check(caseName + " contains no nobr markup", plainText.IndexOf("<nobr", StringComparison.OrdinalIgnoreCase) < 0, plainText);
+        Check(caseName + " contains no non-breaking-space entity", plainText.IndexOf("&nbsp;", StringComparison.OrdinalIgnoreCase) < 0, plainText);
+        Check(caseName + " contains no non-breaking hyphen", !ContainsCodePoint(plainText, '\u2011'), plainText);
+        Check(caseName + " contains no non-breaking space", !ContainsCodePoint(plainText, '\u00A0'), plainText);
+    }
+
     private static void AssertPermissionsHtmlContract(
         string caseName,
         string html,
@@ -393,9 +511,95 @@ internal static class OutlookFileLinkRenderingTests
             false);
     }
 
+    private static void TestHtmlNoBreakEncoderContract()
+    {
+        const string input = "Alpha beta-gamma <span data-evil=\"quoted\">&\"'</span>";
+        string html = HtmlNoBreakEncoder.EncodeFieldLabel(input);
+        IElement wrapper = AssertSingleNoBreakElement("Direct no-break encoder", html);
+        if (wrapper == null)
+        {
+            return;
+        }
+
+        string text = wrapper.TextContent;
+        Check(
+            "Direct no-break encoder converts every ordinary space",
+            CountCodePoint(text, '\u00A0') == CountCodePoint(input, ' ')
+                && !ContainsCodePoint(text, ' '),
+            text);
+        Check(
+            "Direct no-break encoder converts every ASCII hyphen",
+            CountCodePoint(text, '\u2011') == CountCodePoint(input, '-')
+                && !ContainsCodePoint(text, '-'),
+            text);
+        Check(
+            "Direct no-break encoder preserves visible text",
+            string.Equals(NormalizeNoBreakCharacters(text), input, StringComparison.Ordinal),
+            text);
+        Check(
+            "Direct no-break encoder keeps HTML-sensitive input as text",
+            wrapper.Children.Count() == 0,
+            wrapper.OuterHtml);
+        Check(
+            "Direct no-break encoder prevents injected attributes",
+            !wrapper.HasAttribute("data-evil") && wrapper.QuerySelector("[data-evil]") == null,
+            wrapper.OuterHtml);
+    }
+
+    private static void TestBuiltInNoBreakValues()
+    {
+        FileLinkResult result = BuildResult(
+            "https://cloud.example.test/nc/s/AbCd1234",
+            "AbCd1234",
+            string.Empty,
+            new DateTime(2026, 8, 1));
+        string html = FileLinkHtmlBuilder.Build(result, new FileLinkRequest(), "en");
+
+        AssertNoBreakDate("Built-in expiration date", html, "2026-08-01");
+        AssertNoBreakFieldLabel("Built-in Nextcloud link field label", html, "Nextcloud link");
+    }
+
+    private static void TestCustomTemplateNoBreakValues()
+    {
+        const string template = "<p>{LINK_LABEL}</p><p>{EXPIRATIONDATE}</p>";
+        BackendPolicyStatus policy = BuildCustomTemplatePolicy(template);
+        FileLinkResult result = BuildResult(
+            "https://cloud.example.test/nc/s/AbCd1234",
+            "AbCd1234",
+            string.Empty,
+            new DateTime(2026, 8, 1));
+        string html = FileLinkHtmlBuilder.Build(result, new FileLinkRequest(), "custom", policy);
+
+        AssertNoBreakDate("Custom-template expiration date", html, "2026-08-01");
+        AssertNoBreakFieldLabel("Custom-template LINK_LABEL", html, "Nextcloud link");
+    }
+
+    private static void TestPlainTextNoBreakContract()
+    {
+        const string template = "<p>{LINK_LABEL}: {URL}</p><p>{EXPIRATIONDATE}</p>";
+        BackendPolicyStatus policy = BuildCustomTemplatePolicy(template);
+        FileLinkResult result = BuildResult(
+            "https://cloud.example.test/nc/s/AbCd1234",
+            "AbCd1234",
+            string.Empty,
+            new DateTime(2026, 8, 1));
+        FileLinkRequest request = new FileLinkRequest();
+
+        AssertPlainTextNoBreakContract(
+            "Built-in plain text",
+            FileLinkHtmlBuilder.BuildPlainText(result, request, "en"));
+        AssertPlainTextNoBreakContract(
+            "Custom-template plain text",
+            FileLinkHtmlBuilder.BuildPlainText(result, request, "custom", policy));
+    }
+
     public static int Main()
     {
         Strings.SetPreferredUiLanguage("en");
+        TestHtmlNoBreakEncoderContract();
+        TestBuiltInNoBreakValues();
+        TestCustomTemplateNoBreakValues();
+        TestPlainTextNoBreakContract();
         TestPermissionsHtmlContract();
         TestNormalModeUsesNextcloudLinkWording();
         TestAttachmentModeKeepsNextcloudSubpath();
@@ -432,7 +636,7 @@ internal static class OutlookFileLinkRenderingTests
         string html = FileLinkHtmlBuilder.Build(result, request, "en");
         string plainText = FileLinkHtmlBuilder.BuildPlainText(result, request, "en");
 
-        Check("Normal HTML labels the share page as a Nextcloud link", html.Contains(">Nextcloud link<"), html);
+        Check("Normal HTML labels the share page as a Nextcloud link", GetNormalizedVisibleText(html).Contains("Nextcloud link"), html);
         Check("Normal plain text labels the share page as a Nextcloud link", plainText.Contains("Nextcloud link: https://cloud.example.test/nc/s/AbCd1234"), plainText);
         Check("Normal share URL does not gain a ZIP suffix", !html.Contains("/AbCd1234/download") && !plainText.Contains("/AbCd1234/download"));
     }
@@ -445,7 +649,7 @@ internal static class OutlookFileLinkRenderingTests
 
         Check("Attachment ZIP URL keeps /nc subpath in HTML", html.Contains("https://cloud.example.test/nc/s/AbCd1234/download"), html);
         Check("Attachment ZIP URL does not drop /nc subpath in HTML", !html.Contains("https://cloud.example.test/s/AbCd1234/download"), html);
-        Check("Attachment HTML labels the link as ZIP download", html.Contains(">ZIP download<"), html);
+        Check("Attachment HTML labels the link as ZIP download", GetNormalizedVisibleText(html).Contains("ZIP download"), html);
         Check("Attachment HTML explains ZIP download behavior", html.Contains("Download the shared files as a ZIP archive"), html);
     }
 
@@ -535,9 +739,9 @@ internal static class OutlookFileLinkRenderingTests
         Check("Custom normal template resolves LINK_LABEL", normal.Contains("Nextcloud link: https://cloud.example.test/nc/s/AbCd1234"), normal);
         Check("Custom attachment template resolves ZIP LINK_INTRO", zip.Contains("Download the shared files as a ZIP archive"), zip);
         Check("Custom attachment template resolves ZIP LINK_LABEL", zip.Contains("ZIP download: https://cloud.example.test/nc/s/AbCd1234/download"), zip);
-        Check("Custom normal HTML uses the versioned template", normalHtml.Contains("Open the Nextcloud link below to view the share."), normalHtml);
-        Check("Custom attachment HTML resolves the versioned template in ZIP mode", zipHtml.Contains("ZIP download"), zipHtml);
-        Check("Custom attachment HTML resolves the versioned template in share-page mode", sharePageHtml.Contains("Nextcloud link") && !sharePageHtml.Contains("/download"), sharePageHtml);
+        Check("Custom normal HTML uses the versioned template", GetNormalizedVisibleText(normalHtml).Contains("Open the Nextcloud link below to view the share."), normalHtml);
+        Check("Custom attachment HTML resolves the versioned template in ZIP mode", GetNormalizedVisibleText(zipHtml).Contains("ZIP download"), zipHtml);
+        Check("Custom attachment HTML resolves the versioned template in share-page mode", GetNormalizedVisibleText(sharePageHtml).Contains("Nextcloud link") && !sharePageHtml.Contains("/download"), sharePageHtml);
         Check("Versioned template takes precedence over compatibility template", !normal.Contains("Legacy template") && !normalHtml.Contains("Legacy template"), normal + normalHtml);
     }
 
@@ -598,12 +802,21 @@ internal static class OutlookFileLinkRenderingTests
 
     private static FileLinkResult BuildResult(string shareUrl, string token, string password)
     {
+        return BuildResult(shareUrl, token, password, new DateTime(2026, 7, 7));
+    }
+
+    private static FileLinkResult BuildResult(
+        string shareUrl,
+        string token,
+        string password,
+        DateTime? expireDate)
+    {
         return new FileLinkResult(
             shareUrl,
             "42",
             token,
             password,
-            new DateTime(2026, 7, 7),
+            expireDate,
             FileLinkPermissionFlags.Read | FileLinkPermissionFlags.Create,
             "Folder",
             "NC Connector/Folder");
@@ -675,6 +888,7 @@ internal static class OutlookFileLinkRenderingTests
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Models\SharePasswordDeliveryMode.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\BrandingAssets.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\FileLinkHtmlBuilder.cs"),
+        (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\HtmlNoBreakEncoder.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\HtmlTemplateSanitizer.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\HtmlToPlainTextConverter.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\Strings.cs")
@@ -695,6 +909,7 @@ internal static class OutlookFileLinkRenderingTests
     )
 
     $exe = Join-Path $TempRoot "OutlookFileLinkRenderingTests.exe"
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\app.config") -Destination ($exe + ".config")
     & $csc /nologo /nowarn:1702 /target:exe "/out:$exe" @references @resources @sources
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
