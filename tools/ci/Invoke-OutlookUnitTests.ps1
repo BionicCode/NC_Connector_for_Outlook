@@ -397,6 +397,33 @@ internal static class OutlookUtilityTests
             FileLinkPath.BuildShareFolderName(
                 new DateTime(2026, 7, 23),
                 "share"));
+        FileLinkShareTarget target = FileLinkPath.ResolveShareTarget(
+            "NC Connector\\Team",
+            "  quarterly:review  ",
+            new DateTime(2026, 7, 23, 23, 59, 59),
+            "share");
+        Equal(
+            "FileLink share target normalizes the configured base path",
+            "NC Connector/Team",
+            target.BasePath);
+        Equal(
+            "FileLink share target sanitizes the entered name",
+            "quarterly_review",
+            target.ShareName);
+        Equal(
+            "FileLink share target keeps the wizard date",
+            "NC Connector/Team/20260723_quarterly_review",
+            target.RelativeFolderPath);
+        FileLinkShareTarget fallbackTarget =
+            FileLinkPath.ResolveShareTarget(
+                "NC Connector",
+                "   ",
+                new DateTime(2026, 7, 24),
+                "share");
+        Equal(
+            "FileLink share target applies the localized fallback",
+            "NC Connector/20260724_share",
+            fallbackTarget.RelativeFolderPath);
     }
 
     private static void TestFileLinkUploadPlanner()
