@@ -29,6 +29,7 @@ namespace NcTalkOutlookAddIn.Utilities
             "System.Buffers",
             "System.Collections.Immutable",
             "System.Memory",
+            "System.Numerics.Vectors",
             "System.Runtime.CompilerServices.Unsafe",
             "System.Text.Encoding.CodePages"
         };
@@ -48,6 +49,7 @@ namespace NcTalkOutlookAddIn.Utilities
             "textarea",
             "select",
             "option",
+            "template",
             "svg",
             "math"
         };
@@ -346,6 +348,7 @@ accept action align alt autocapitalize autocomplete autopictureinpicture autopla
             TryLoadDependency(Path.Combine(assemblyDirectory, "System.Buffers.dll"));
             TryLoadDependency(Path.Combine(assemblyDirectory, "System.Collections.Immutable.dll"));
             TryLoadDependency(Path.Combine(assemblyDirectory, "System.Memory.dll"));
+            TryLoadDependency(Path.Combine(assemblyDirectory, "System.Numerics.Vectors.dll"));
             TryLoadDependency(Path.Combine(assemblyDirectory, "System.Runtime.CompilerServices.Unsafe.dll"));
             TryLoadDependency(Path.Combine(assemblyDirectory, "System.Text.Encoding.CodePages.dll"));
         }

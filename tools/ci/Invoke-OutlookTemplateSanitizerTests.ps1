@@ -11,6 +11,7 @@ try {
     $testSource = Join-Path $TempRoot "OutlookTemplateSanitizerTests.cs"
     @'
 using System;
+using System.Text;
 using NcTalkOutlookAddIn.Utilities;
 
 namespace NcTalkOutlookAddIn.Utilities
@@ -46,6 +47,7 @@ internal static class OutlookTemplateSanitizerTests
     public static int Main()
     {
         TestShareTemplateSanitizer();
+        TestDeeplyNestedTemplateSanitizer();
         TestEmailSignatureSanitizer();
         TestTalkAppointmentCompatibilityTransform();
 
@@ -56,6 +58,25 @@ internal static class OutlookTemplateSanitizerTests
         }
         Console.WriteLine("All Outlook template sanitizer tests passed.");
         return 0;
+    }
+
+    private static void TestDeeplyNestedTemplateSanitizer()
+    {
+        var payload = new StringBuilder();
+        for (int i = 0; i < 513; i++)
+        {
+            payload.Append("<div>");
+        }
+        payload.Append("<template><script>alert(1)</script><img src=\"x\" onerror=\"alert(2)\"></template>");
+        for (int i = 0; i < 513; i++)
+        {
+            payload.Append("</div>");
+        }
+
+        string sanitized = HtmlTemplateSanitizer.SanitizeShareTemplateHtml(payload.ToString());
+        Check("Deep nesting removes template elements", !sanitized.Contains("<template"), sanitized);
+        Check("Deep nesting removes script elements", !sanitized.Contains("<script"), sanitized);
+        Check("Deep nesting removes event handlers", !sanitized.Contains("onerror"), sanitized);
     }
 
     private static void TestShareTemplateSanitizer()
@@ -101,6 +122,7 @@ internal static class OutlookTemplateSanitizerTests
     $references = @(
         "/reference:System.dll",
         "/reference:System.Core.dll",
+        "/reference:System.Numerics.dll",
         "/reference:System.Web.dll"
     )
     Get-ChildItem -Path $vendorDir -Filter "*.dll" | ForEach-Object {
