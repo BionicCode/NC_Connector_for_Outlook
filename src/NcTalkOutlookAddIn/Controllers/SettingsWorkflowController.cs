@@ -9,6 +9,7 @@ using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Services;
 using NcTalkOutlookAddIn.Settings;
 using NcTalkOutlookAddIn.UI;
+using NcTalkOutlookAddIn.Utilities;
 using Outlook = Microsoft.Office.Interop.Outlook;
 
 namespace NcTalkOutlookAddIn.Controllers
@@ -22,11 +23,13 @@ namespace NcTalkOutlookAddIn.Controllers
         private readonly Action<AddinSettings> _setCurrentSettings;
         private readonly Func<TalkServiceConfiguration, string, BackendPolicyStatus> _fetchBackendPolicyStatus;
         private readonly Action<AddinSettings> _configureDiagnostics;
-        private readonly Func<string, bool, bool> _applyTransportSecurityFromSettings;
+        private readonly Func<AddinSettings, string, bool, bool> _applyTransportSecurityFromSettings;
         private readonly Action _applyIfbSettings;
         private readonly Action<AddinSettings> _persistSettings;
         private readonly Func<Action, Task> _runOnOutlookUiThreadAsync;
         private readonly Action<string> _logSettings;
+        private readonly string _dataDirectory;
+        private readonly string _outlookProfileScope;
 
         internal SettingsWorkflowController(
             Outlook.Application outlookApplication,
@@ -34,11 +37,13 @@ namespace NcTalkOutlookAddIn.Controllers
             Action<AddinSettings> setCurrentSettings,
             Func<TalkServiceConfiguration, string, BackendPolicyStatus> fetchBackendPolicyStatus,
             Action<AddinSettings> configureDiagnostics,
-            Func<string, bool, bool> applyTransportSecurityFromSettings,
+            Func<AddinSettings, string, bool, bool> applyTransportSecurityFromSettings,
             Action applyIfbSettings,
             Action<AddinSettings> persistSettings,
             Func<Action, Task> runOnOutlookUiThreadAsync,
-            Action<string> logSettings)
+            Action<string> logSettings,
+            string dataDirectory,
+            string outlookProfileScope)
         {
             _outlookApplication = outlookApplication;
             _getCurrentSettings = getCurrentSettings;
@@ -50,6 +55,8 @@ namespace NcTalkOutlookAddIn.Controllers
             _persistSettings = persistSettings;
             _runOnOutlookUiThreadAsync = runOnOutlookUiThreadAsync;
             _logSettings = logSettings;
+            _dataDirectory = dataDirectory ?? string.Empty;
+            _outlookProfileScope = outlookProfileScope ?? string.Empty;
         }
 
         internal async Task RunAsync()
@@ -69,12 +76,30 @@ namespace NcTalkOutlookAddIn.Controllers
                 currentSettings.Username ?? string.Empty,
                 currentSettings.AppPassword ?? string.Empty);
 
-            BackendPolicyStatus initialPolicyStatus = null;
-            if (_fetchBackendPolicyStatus != null)
-            {
-                initialPolicyStatus = await Task.Run(() =>
-                    _fetchBackendPolicyStatus(configuration, "settings_open_initial")).ConfigureAwait(false);
-            }
+            var addressBookCache = new IfbAddressBookCache(
+                _dataDirectory,
+                _outlookProfileScope);
+            Task<BackendPolicyStatus> policyStatusTask =
+                _fetchBackendPolicyStatus != null
+                    ? Task.Run(
+                        () => _fetchBackendPolicyStatus(
+                            configuration,
+                            "settings_open_initial"))
+                    : Task.FromResult<BackendPolicyStatus>(null);
+            Task<IfbAddressBookCache.SystemAddressbookStatus> addressbookStatusTask =
+                Task.Run(
+                    () => addressBookCache.GetSystemAddressbookStatus(
+                        configuration,
+                        currentSettings.IfbCacheHours,
+                        false));
+            await Task.WhenAll(
+                    policyStatusTask,
+                    addressbookStatusTask)
+                .ConfigureAwait(false);
+            BackendPolicyStatus initialPolicyStatus =
+                await policyStatusTask.ConfigureAwait(false);
+            IfbAddressBookCache.SystemAddressbookStatus initialAddressbookStatus =
+                await addressbookStatusTask.ConfigureAwait(false);
 
             if (_runOnOutlookUiThreadAsync == null)
             {
@@ -82,48 +107,93 @@ namespace NcTalkOutlookAddIn.Controllers
             }
 
             await _runOnOutlookUiThreadAsync(
-                () => RunSettingsDialogOnUiThread(currentSettings, initialPolicyStatus)).ConfigureAwait(false);
+                () => RunSettingsDialogOnUiThread(
+                    currentSettings,
+                    initialPolicyStatus,
+                    addressBookCache,
+                    initialAddressbookStatus)).ConfigureAwait(false);
         }
 
         private void RunSettingsDialogOnUiThread(
             AddinSettings currentSettings,
-            BackendPolicyStatus initialPolicyStatus)
+            BackendPolicyStatus initialPolicyStatus,
+            IfbAddressBookCache addressBookCache,
+            IfbAddressBookCache.SystemAddressbookStatus initialAddressbookStatus)
         {
             // SettingsForm owns Outlook COM references and async WinForms handlers, so its complete
             // modal lifetime must begin on the Outlook STA thread captured during add-in startup.
-            using (var form = new SettingsForm(currentSettings, _outlookApplication, initialPolicyStatus))
+            using (var form = new SettingsForm(
+                currentSettings,
+                _outlookApplication,
+                initialPolicyStatus,
+                addressBookCache,
+                initialAddressbookStatus))
             {
                 if (form.ShowDialog() == DialogResult.OK)
                 {
                     AddinSettings previousSettings = currentSettings.Clone();
-                    AddinSettings nextSettings = form.Result ?? new AddinSettings();
+                    AddinSettings nextSettings = (form.Result ?? new AddinSettings()).Clone();
 
-                    if (_setCurrentSettings != null)
+                    if (!ValidateTransportSecurityBeforeSave(previousSettings, nextSettings))
                     {
-                        _setCurrentSettings(nextSettings);
-                    }
-                    if (_configureDiagnostics != null)
-                    {
-                        _configureDiagnostics(nextSettings);
-                    }
-                    if (_applyTransportSecurityFromSettings != null
-                        && !_applyTransportSecurityFromSettings("settings_save", true))
-                    {
-                        if (_setCurrentSettings != null)
-                        {
-                            _setCurrentSettings(previousSettings);
-                        }
-                        if (_configureDiagnostics != null)
-                        {
-                            _configureDiagnostics(previousSettings);
-                        }
-                        if (_applyTransportSecurityFromSettings != null)
-                        {
-                            _applyTransportSecurityFromSettings("settings_save_revert", false);
-                        }
-
                         _logSettings("Settings save aborted because transport security settings could not be applied.");
                         return;
+                    }
+
+                    if (_persistSettings == null)
+                    {
+                        throw new InvalidOperationException("The settings persistence service is unavailable.");
+                    }
+
+                    try
+                    {
+                        _persistSettings(nextSettings);
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticsLogger.LogException(
+                            LogCategories.Core,
+                            "Settings save failed; runtime settings were not changed.",
+                            ex);
+                        MessageBox.Show(
+                            form,
+                            Strings.SettingsSaveFailed
+                            + Environment.NewLine
+                            + Environment.NewLine
+                            + (ex.Message ?? string.Empty),
+                            Strings.SettingsFormTitle,
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    ApplyRuntimeSettings(nextSettings);
+
+                    if (_applyTransportSecurityFromSettings != null
+                        && !_applyTransportSecurityFromSettings(
+                            nextSettings,
+                            "settings_save_commit",
+                            false))
+                    {
+                        try
+                        {
+                            _persistSettings(previousSettings);
+                        }
+                        finally
+                        {
+                            ApplyRuntimeSettings(previousSettings);
+                            _applyTransportSecurityFromSettings(
+                                previousSettings,
+                                "settings_save_commit_revert",
+                                false);
+                        }
+                        _logSettings("Settings save reverted because transport security settings could not be committed.");
+                        return;
+                    }
+
+                    if (_applyIfbSettings != null)
+                    {
+                        _applyIfbSettings();
                     }
 
                     _logSettings(
@@ -133,20 +203,43 @@ namespace NcTalkOutlookAddIn.Controllers
                         + ", Debug=" + nextSettings.DebugLoggingEnabled
                         + ", LogAnonymize=" + nextSettings.LogAnonymizationEnabled
                         + ").");
-
-                    if (_applyIfbSettings != null)
-                    {
-                        _applyIfbSettings();
-                    }
-                    if (_persistSettings != null)
-                    {
-                        _persistSettings(nextSettings);
-                    }
                 }
                 else
                 {
                     _logSettings("Settings dialog closed without changes.");
                 }
+            }
+        }
+
+        private bool ValidateTransportSecurityBeforeSave(
+            AddinSettings previousSettings,
+            AddinSettings nextSettings)
+        {
+            if (_applyTransportSecurityFromSettings == null)
+            {
+                return true;
+            }
+
+            bool valid = _applyTransportSecurityFromSettings(
+                nextSettings,
+                "settings_save_validate",
+                true);
+            _applyTransportSecurityFromSettings(
+                previousSettings,
+                "settings_save_validate_revert",
+                false);
+            return valid;
+        }
+
+        private void ApplyRuntimeSettings(AddinSettings settings)
+        {
+            if (_setCurrentSettings != null)
+            {
+                _setCurrentSettings(settings);
+            }
+            if (_configureDiagnostics != null)
+            {
+                _configureDiagnostics(settings);
             }
         }
     }

@@ -100,6 +100,7 @@
     <Compile Include="Settings\AddinSettings.cs" />
     <Compile Include="Settings\AuthenticationMode.cs" />
     <Compile Include="Settings\ManagedSetupPolicy.cs" />
+    <Compile Include="Settings\SettingsFileTransaction.cs" />
     <Compile Include="Settings\SettingsStorage.cs" />
     <Compile Include="Models\TalkRoomType.cs" />
     <Compile Include="Models\TalkRoomRequest.cs" />
@@ -208,6 +209,7 @@
     <Compile Include="Utilities\FileLinkPath.cs" />
     <Compile Include="Utilities\FileLinkUploadPolicy.cs" />
     <Compile Include="Utilities\NextcloudVersionHelper.cs" />
+    <Compile Include="Utilities\NextcloudUriValidator.cs" />
     <Compile Include="Utilities\Strings.cs" />
     <Compile Include="Utilities\SizeFormatting.cs" />
     <Compile Include="Utilities\PasswordGenerator.cs" />

@@ -62,7 +62,6 @@ namespace NcTalkOutlookAddIn
         private OutlookUiSynchronizationContext _uiSynchronizationContext;
         private IRibbonUI _ribbonUi;
         private const int ComposeAttachmentEvalDebounceMs = 250;
-
         internal const string IcalToken = "X-NCTALK-TOKEN";
         internal const string IcalUrl = "X-NCTALK-URL";
         internal const string IcalLobby = "X-NCTALK-LOBBY";
@@ -247,17 +246,25 @@ namespace NcTalkOutlookAddIn
                 settings => _currentSettings = settings,
                 (configuration, trigger) => FetchBackendPolicyStatus(configuration, trigger),
                 settings => ConfigureDiagnosticsLogger(settings),
-                (source, showWarning) => TryApplyTransportSecurityFromSettings(source, showWarning),
+                (settings, source, showWarning) =>
+                    TryApplyTransportSecurityFromSettings(
+                        settings,
+                        source,
+                        showWarning),
                 () => ApplyIfbSettings(),
                 settings =>
                 {
                     if (_settingsStorage != null)
                     {
-                        _settingsStorage.Save(settings);
+                        _settingsStorage.SaveUserInitiated(settings);
                     }
                 },
                 callback => RunOnOutlookUiThreadAsync(callback),
-                message => LogSettings(message));
+                message => LogSettings(message),
+                _settingsStorage != null
+                    ? _settingsStorage.DataDirectory
+                    : string.Empty,
+                OutlookProfileScope);
         }
 
         public stdole.IPictureDisp OnGetButtonImage(IRibbonControl control)
@@ -938,9 +945,20 @@ namespace NcTalkOutlookAddIn
 
         private bool TryApplyTransportSecurityFromSettings(string source, bool showWarning)
         {
+            return TryApplyTransportSecurityFromSettings(
+                _currentSettings,
+                source,
+                showWarning);
+        }
+
+        private bool TryApplyTransportSecurityFromSettings(
+            AddinSettings settings,
+            string source,
+            bool showWarning)
+        {
             try
             {
-                TransportSecurityConfigurator.ApplyFromSettings(_currentSettings, source);
+                TransportSecurityConfigurator.ApplyFromSettings(settings, source);
                 return true;
             }
             catch (Exception ex)

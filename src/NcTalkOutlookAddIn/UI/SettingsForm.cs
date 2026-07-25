@@ -149,9 +149,12 @@ namespace NcTalkOutlookAddIn.UI
         private int _sharingAttachmentLockThresholdMb = 5;
         private bool _talkAddressbookLockActive;
         private string _talkAddressbookLockDetail = string.Empty;
+        private int _addressbookRefreshGeneration;
         private bool _layoutApplying;
         private bool _suppressImmediateTlsApply;
         private readonly SecurityProtocolType _runtimeSecurityProtocolAtOpen;
+        private readonly IfbAddressBookCache _addressBookCache;
+        private readonly IfbAddressBookCache.SystemAddressbookStatus _initialAddressbookStatus;
         private BackendPolicyStatus _backendPolicyStatus;
         private string _updateOpenUrl = string.Empty;
 
@@ -161,10 +164,17 @@ namespace NcTalkOutlookAddIn.UI
             private set { _result = value; }
         }
 
-        internal SettingsForm(AddinSettings settings, Outlook.Application outlookApplication, BackendPolicyStatus initialPolicyStatus)
+        internal SettingsForm(
+            AddinSettings settings,
+            Outlook.Application outlookApplication,
+            BackendPolicyStatus initialPolicyStatus,
+            IfbAddressBookCache addressBookCache,
+            IfbAddressBookCache.SystemAddressbookStatus initialAddressbookStatus)
         {
             _outlookApplication = outlookApplication;
             _backendPolicyStatus = initialPolicyStatus;
+            _addressBookCache = addressBookCache;
+            _initialAddressbookStatus = initialAddressbookStatus;
             _runtimeSecurityProtocolAtOpen = ServicePointManager.SecurityProtocol;
             _disabledTooltipHints = new DisabledControlTooltipHintHelper(_toolTip);
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -226,7 +236,7 @@ namespace NcTalkOutlookAddIn.UI
             _saveButton.Size = new Size(120, 32);
             _saveButton.Location = new Point(ClientSize.Width - 262, ClientSize.Height - 44);
             _saveButton.Anchor = AnchorStyles.None;
-            _saveButton.DialogResult = DialogResult.OK;
+            _saveButton.DialogResult = DialogResult.None;
             _saveButton.Click += OnSaveButtonClick;
             Controls.Add(_saveButton);
 
@@ -380,7 +390,6 @@ namespace NcTalkOutlookAddIn.UI
         {
             base.OnShown(e);
             ApplyResponsiveLayout(true);
-            RefreshBackendPolicyStatus("settings_open");
         }
 
         private void ApplyResponsiveLayout(bool ensureClientWidth)
@@ -1388,7 +1397,7 @@ namespace NcTalkOutlookAddIn.UI
                 UpdateSharingAttachmentOptionsState();
                 UpdateTlsOptionsState();
                 ApplyBackendPolicyStatus("settings_init");
-                RefreshTalkSystemAddressbookState(true, "settings_open");
+                ApplyInitialTalkSystemAddressbookState();
             }
             finally
             {
@@ -1396,14 +1405,59 @@ namespace NcTalkOutlookAddIn.UI
             }
         }
 
-        private void OnSaveButtonClick(object sender, EventArgs e)
+        private async void OnSaveButtonClick(object sender, EventArgs e)
         {
+            try
+            {
+                await SaveSettingsAsync();
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLogger.LogException(
+                    LogCategories.Core,
+                    "Settings form save failed.",
+                    ex);
+                if (!IsDisposed && !Disposing)
+                {
+                    SetBusy(false);
+                    SetStatus(Strings.SettingsSaveFailed, true);
+                }
+            }
+        }
+
+        private async Task SaveSettingsAsync()
+        {
+            if (_isBusy)
+            {
+                return;
+            }
             bool requestedSignatureOnCompose = _emailSignatureOnComposeCheckBox.Checked;
             bool requestedSignatureOnReply = _emailSignatureOnReplyCheckBox.Checked;
             bool requestedSignatureOnForward = _emailSignatureOnForwardCheckBox.Checked;
             AttachmentLinkTarget requestedAttachmentLinkTarget = GetSelectedAttachmentLinkTarget();
+            string requestedServerUrl = Result.ManagedNextcloudUrlLocked
+                ? Result.ManagedNextcloudUrl
+                : _serverUrlTextBox.Text.Trim();
+            string normalizedServerUrl = string.Empty;
+            if (!string.IsNullOrWhiteSpace(requestedServerUrl)
+                && !NextcloudUriValidator.TryNormalizeBaseUrl(requestedServerUrl, out normalizedServerUrl))
+            {
+                SetStatus(Strings.StatusInvalidServerUrl, true);
+                return;
+            }
 
-            RefreshBackendPolicyStatus("settings_save");
+            _serverUrlTextBox.Text = normalizedServerUrl;
+            var configuration = new TalkServiceConfiguration(
+                normalizedServerUrl,
+                _usernameTextBox.Text.Trim(),
+                _appPasswordTextBox.Text ?? string.Empty);
+            if (!await RefreshSettingsServerStateAsync(
+                    configuration,
+                    true,
+                    "settings_save"))
+            {
+                return;
+            }
             if (!IsPolicyLocked("share", AttachmentLinkTargetPolicy.Key))
             {
                 SelectAttachmentLinkTarget(requestedAttachmentLinkTarget);
@@ -1424,8 +1478,6 @@ namespace NcTalkOutlookAddIn.UI
                 }
             }
 
-            RefreshTalkSystemAddressbookState(true, "settings_save");
-
             if (!_tlsUseSystemDefaultCheckBox.Checked
                 && !_tlsEnable12CheckBox.Checked
                 && !_tlsEnable13CheckBox.Checked)
@@ -1438,7 +1490,7 @@ namespace NcTalkOutlookAddIn.UI
                 return;
             }
 
-            Result.ServerUrl = Result.ManagedNextcloudUrlLocked ? Result.ManagedNextcloudUrl : _serverUrlTextBox.Text.Trim();
+            Result.ServerUrl = normalizedServerUrl;
             Result.Username = _usernameTextBox.Text.Trim();
             Result.AppPassword = _appPasswordTextBox.Text;
             Result.AuthMode = _loginFlowRadio.Checked ? AuthenticationMode.LoginFlow : AuthenticationMode.Manual;
@@ -1482,6 +1534,8 @@ namespace NcTalkOutlookAddIn.UI
             }
             Result.ShareBlockLang = GetSelectedLanguageChoice(_shareBlockLangCombo);
             Result.EventDescriptionLang = GetSelectedLanguageChoice(_eventDescriptionLangCombo);
+            DialogResult = DialogResult.OK;
+            Close();
         }
 
         // WinForms event handlers must stay async void; keep awaited flow inside this method-level try/catch.
@@ -1594,10 +1648,17 @@ namespace NcTalkOutlookAddIn.UI
                 SetStatus(Strings.StatusMissingFields, true);
                 return;
             }
+            string normalizedUrl;
+            if (!NextcloudUriValidator.TryNormalizeBaseUrl(baseUrl, out normalizedUrl))
+            {
+                SetStatus(Strings.StatusInvalidServerUrl, true);
+                return;
+            }
+            _serverUrlTextBox.Text = normalizedUrl;
 
             SetBusy(true);
             SetStatus(Strings.StatusTestRunning, false);
-            DiagnosticsLogger.Log(LogCategories.Core, "Connection test started (Server=" + baseUrl + ", User=" + user + ").");
+            DiagnosticsLogger.Log(LogCategories.Core, "Connection test started (Server=" + normalizedUrl + ", User=" + user + ").");
             SecurityProtocolType previousSecurityProtocol = ServicePointManager.SecurityProtocol;
             bool temporaryTlsApplied = false;
 
@@ -1606,7 +1667,7 @@ namespace NcTalkOutlookAddIn.UI
                 previousSecurityProtocol = ApplyTemporaryTlsForConnectivity("settings_connection_test");
                 temporaryTlsApplied = true;
 
-                var service = new TalkService(new TalkServiceConfiguration(baseUrl, user, appPassword));
+                var service = new TalkService(new TalkServiceConfiguration(normalizedUrl, user, appPassword));
                 string responseMessage = string.Empty;
                 bool success = await Task.Run(() => service.VerifyConnection(out responseMessage));
                 if (success)
@@ -1736,7 +1797,7 @@ namespace NcTalkOutlookAddIn.UI
             UpdateControlState();
         }
 
-        private void OnSelectedTabChanged(object sender, EventArgs e)
+        private async void OnSelectedTabChanged(object sender, EventArgs e)
         {
             if (_tabControl.SelectedTab == _fileLinkTab)
             {
@@ -1744,9 +1805,26 @@ namespace NcTalkOutlookAddIn.UI
                 UpdateSharingAttachmentOptionsState();
                 return;
             }
-            if (_tabControl.SelectedTab == _talkTab)
+            if (_tabControl.SelectedTab == _talkTab && !_isBusy)
             {
-                RefreshTalkSystemAddressbookState(true, "settings_tab_talk");
+                var configuration = new TalkServiceConfiguration(
+                    _serverUrlTextBox.Text.Trim(),
+                    _usernameTextBox.Text.Trim(),
+                    _appPasswordTextBox.Text ?? string.Empty);
+                try
+                {
+                    await RefreshTalkSystemAddressbookStateAsync(
+                        configuration,
+                        false,
+                        "settings_tab_talk");
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticsLogger.LogException(
+                        LogCategories.Talk,
+                        "System address book refresh failed in settings.",
+                        ex);
+                }
             }
         }
 
@@ -1774,25 +1852,82 @@ namespace NcTalkOutlookAddIn.UI
             return Strings.SignatureBackendInactiveTooltip;
         }
 
-        private void RefreshBackendPolicyStatus(string trigger)
+        private async Task<bool> RefreshSettingsServerStateAsync(
+            TalkServiceConfiguration configuration,
+            bool forceAddressbookRefresh,
+            string trigger)
         {
-            string serverUrl = _serverUrlTextBox.Text.Trim();
-            string username = _usernameTextBox.Text.Trim();
-            string appPassword = _appPasswordTextBox.Text ?? string.Empty;
-            var configuration = new TalkServiceConfiguration(serverUrl, username, appPassword);
-
+            SetBusy(true);
+            int addressbookGeneration = ++_addressbookRefreshGeneration;
+            int cacheHours = ParseComboValue(_ifbCacheHoursCombo, 24);
             try
             {
-                var service = new BackendPolicyService(configuration);
-                _backendPolicyStatus = service.FetchStatus();
+                Task<BackendPolicyStatus> policyTask = Task.Run(
+                    () => new BackendPolicyService(configuration).FetchStatus());
+                Task<IfbAddressBookCache.SystemAddressbookStatus> addressbookTask =
+                    _addressBookCache != null
+                        ? Task.Run(
+                            () => _addressBookCache.GetSystemAddressbookStatus(
+                                configuration,
+                                cacheHours,
+                                forceAddressbookRefresh))
+                        : Task.FromResult(_initialAddressbookStatus);
+
+                await Task.WhenAll(policyTask, addressbookTask);
+                BackendPolicyStatus policyStatus = await policyTask;
+                IfbAddressBookCache.SystemAddressbookStatus addressbookStatus =
+                    await addressbookTask;
+                if (IsDisposed || Disposing)
+                {
+                    return false;
+                }
+
+                _backendPolicyStatus = policyStatus;
+                ApplyBackendPolicyStatus(trigger);
+                if (addressbookGeneration == _addressbookRefreshGeneration)
+                {
+                    ApplyTalkSystemAddressbookStatus(
+                        addressbookStatus,
+                        trigger);
+                }
+
+                if (configuration != null
+                    && configuration.IsComplete()
+                    && (policyStatus == null || !policyStatus.FetchSucceeded))
+                {
+                    SetStatus(
+                        string.Format(
+                            CultureInfo.CurrentCulture,
+                            Strings.StatusTestFailure,
+                            Strings.StatusTestFailureUnknown),
+                        true);
+                }
+                return true;
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.LogException(LogCategories.Core, "Backend policy status check failed in settings.", ex);
-                _backendPolicyStatus = null;
+                DiagnosticsLogger.LogException(
+                    LogCategories.Core,
+                    "Settings server state refresh failed.",
+                    ex);
+                if (!IsDisposed && !Disposing)
+                {
+                    SetStatus(
+                        string.Format(
+                            CultureInfo.CurrentCulture,
+                            Strings.StatusTestFailure,
+                            ex.Message ?? Strings.StatusTestFailureUnknown),
+                        true);
+                }
+                return true;
             }
-
-            ApplyBackendPolicyStatus(trigger);
+            finally
+            {
+                if (!IsDisposed && !Disposing)
+                {
+                    SetBusy(false);
+                }
+            }
         }
 
         private void ApplyBackendPolicyStatus(string trigger)
@@ -2138,24 +2273,52 @@ namespace NcTalkOutlookAddIn.UI
                 _sharingAttachmentLinkTargetLabel);
         }
 
-        private void RefreshTalkSystemAddressbookState(bool forceRefresh, string trigger)
+        private void ApplyInitialTalkSystemAddressbookState()
         {
-            string serverUrl = _serverUrlTextBox.Text.Trim();
-            string username = _usernameTextBox.Text.Trim();
-            string appPassword = _appPasswordTextBox.Text ?? string.Empty;
-            int cacheHours = ParseComboValue(_ifbCacheHoursCombo, 24);
-            var configuration = new TalkServiceConfiguration(serverUrl, username, appPassword);
-            var cache = new IfbAddressBookCache(AppDataPaths.EnsureLocalRootDirectory());
+            ApplyTalkSystemAddressbookStatus(
+                _initialAddressbookStatus,
+                "settings_open");
+        }
 
+        private async Task RefreshTalkSystemAddressbookStateAsync(
+            TalkServiceConfiguration configuration,
+            bool forceRefresh,
+            string trigger)
+        {
+            int generation = ++_addressbookRefreshGeneration;
+            int cacheHours = ParseComboValue(_ifbCacheHoursCombo, 24);
             DiagnosticsLogger.Log(
                 LogCategories.Talk,
                 "System address book status check requested from settings (trigger=" + (trigger ?? "n/a") +
                 ", forceRefresh=" + forceRefresh + ").");
 
-            var status = cache.GetSystemAddressbookStatus(configuration, cacheHours, forceRefresh);
-            bool lockActive = !status.Available;
+            IfbAddressBookCache.SystemAddressbookStatus status =
+                _addressBookCache != null
+                    ? await Task.Run(
+                        () => _addressBookCache.GetSystemAddressbookStatus(
+                            configuration,
+                            cacheHours,
+                            forceRefresh))
+                    : _initialAddressbookStatus;
+            if (generation != _addressbookRefreshGeneration
+                || IsDisposed
+                || Disposing)
+            {
+                return;
+            }
+            ApplyTalkSystemAddressbookStatus(status, trigger);
+        }
+
+        private void ApplyTalkSystemAddressbookStatus(
+            IfbAddressBookCache.SystemAddressbookStatus status,
+            string trigger)
+        {
+            bool statusAvailable = status != null && status.Available;
+            bool lockActive = !statusAvailable;
             string detail = lockActive ? Strings.TalkSystemAddressbookRequiredMessage : string.Empty;
-            if (lockActive && !string.IsNullOrWhiteSpace(status.Error))
+            if (lockActive
+                && status != null
+                && !string.IsNullOrWhiteSpace(status.Error))
             {
                 DiagnosticsLogger.Log(
                     LogCategories.Talk,

@@ -5,10 +5,34 @@ Param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path $ProjectRoot).Path
 $SourceRoot = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn"
+$ProjectFile = Join-Path $SourceRoot "NcTalkOutlookAddIn.csproj"
 
 $failures = New-Object System.Collections.Generic.List[string]
 $sourceFiles = Get-ChildItem -Path $SourceRoot -Recurse -Filter "*.cs" |
     Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' }
+
+[xml]$projectXml = Get-Content -LiteralPath $ProjectFile -Raw
+$compileItems = New-Object System.Collections.Generic.HashSet[string](
+    [System.StringComparer]::OrdinalIgnoreCase)
+foreach ($node in $projectXml.SelectNodes("//*[local-name()='Compile']")) {
+    $include = [string]$node.Include
+    if (-not [string]::IsNullOrWhiteSpace($include)) {
+        $compileItems.Add($include.Replace("/", "\")) | Out-Null
+    }
+}
+
+foreach ($file in $sourceFiles) {
+    $projectRelative = $file.FullName.Substring($SourceRoot.Length + 1)
+    if (-not $compileItems.Contains($projectRelative)) {
+        $failures.Add("$projectRelative is not compiled by NcTalkOutlookAddIn.csproj.")
+    }
+}
+
+foreach ($include in $compileItems) {
+    if (-not (Test-Path -LiteralPath (Join-Path $SourceRoot $include))) {
+        $failures.Add("NcTalkOutlookAddIn.csproj references missing source file '$include'.")
+    }
+}
 
 foreach ($file in $sourceFiles) {
     $relative = $file.FullName.Substring($ProjectRoot.Length + 1)
@@ -34,7 +58,8 @@ $asyncVoidAllowList = @(
     'OnAttachmentEvalTimerTick',
     'OnBeforeAddShareTimerTick',
     'OnEmailSignatureTimerTick',
-    'RunAttachmentFlowTask',
+    'OnSaveButtonClick',
+    'OnSelectedTabChanged',
     'OnUpdateCheckButtonClick',
     'OnLoginFlowButtonClick',
     'OnTestButtonClick'

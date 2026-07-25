@@ -41,6 +41,8 @@ namespace NcTalkOutlookAddIn.Settings
         private readonly string _legacyFolderDirectory;
         private readonly string _legacyDataIniPath;
         private readonly string _legacyFolderIniPath;
+        private readonly SettingsFileTransaction _settingsFileTransaction;
+        private bool _automaticSaveBlocked;
 
         internal string DataDirectory
         {
@@ -52,6 +54,7 @@ namespace NcTalkOutlookAddIn.Settings
             _profileName = NormalizeProfileName(outlookProfileName);
             _dataDirectory = AppDataPaths.EnsureLocalRootDirectory();
             _filePath = Path.Combine(_dataDirectory, BuildProfileFileName(_profileName));
+            _settingsFileTransaction = new SettingsFileTransaction(_filePath);
 
             var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             _legacyDataDirectory = Path.Combine(localAppData, LegacyDataFolderName);
@@ -59,28 +62,102 @@ namespace NcTalkOutlookAddIn.Settings
             _legacyDataIniPath = Path.Combine(_legacyDataDirectory, LegacyIniFileName);
             _legacyFolderIniPath = Path.Combine(_legacyFolderDirectory, LegacyIniFileName);
 
-            MigrateLegacyRuntimeArtifacts();
-            EnsureLegacyIniMigrated();
+            using (_settingsFileTransaction.AcquireLock())
+            {
+                MigrateLegacyRuntimeArtifacts();
+                EnsureLegacyIniMigrated();
+            }
         }
 
         internal AddinSettings Load()
         {
-            if (File.Exists(_filePath))
+            try
+            {
+                using (_settingsFileTransaction.AcquireLock())
+                {
+                    return LoadUnderLock();
+                }
+            }
+            catch (Exception ex)
+            {
+                _automaticSaveBlocked = true;
+                DiagnosticsLogger.LogException(LogCategories.Core, "Failed to acquire or read profile settings.", ex);
+                return ApplyManagedSetupPolicy(new AddinSettings());
+            }
+        }
+
+        internal void Save(AddinSettings settings)
+        {
+            SaveCore(settings, false);
+        }
+
+        internal void SaveUserInitiated(AddinSettings settings)
+        {
+            SaveCore(settings, true);
+        }
+
+        private AddinSettings LoadUnderLock()
+        {
+            _automaticSaveBlocked = false;
+            bool primaryExists = File.Exists(_filePath);
+            bool backupExists = File.Exists(_settingsFileTransaction.BackupPath);
+
+            if (primaryExists)
             {
                 try
                 {
-                    return ApplyManagedSetupPolicy(LoadFromXmlFile(_filePath));
+                    bool passwordReadFailed;
+                    AddinSettings settings = LoadFromXmlFile(_filePath, out passwordReadFailed);
+                    if (passwordReadFailed)
+                    {
+                        _automaticSaveBlocked = true;
+                        DiagnosticsLogger.Log(
+                            LogCategories.Core,
+                            "Profile settings loaded without the app password because DPAPI decryption failed; automatic saves are blocked.");
+                    }
+                    return ApplyManagedSetupPolicy(settings);
                 }
                 catch (Exception ex)
                 {
                     DiagnosticsLogger.LogException(LogCategories.Core, "Failed to load profile settings XML.", ex);
                 }
             }
+
+            if (backupExists)
+            {
+                try
+                {
+                    bool passwordReadFailed;
+                    AddinSettings backupSettings = LoadFromXmlFile(
+                        _settingsFileTransaction.BackupPath,
+                        out passwordReadFailed);
+                    _automaticSaveBlocked = passwordReadFailed;
+                    if (passwordReadFailed)
+                    {
+                        DiagnosticsLogger.Log(
+                            LogCategories.Core,
+                            "Profile settings backup loaded without the app password because DPAPI decryption failed; automatic saves are blocked.");
+                    }
+                    else
+                    {
+                        TryRestorePrimarySettingsFromBackup();
+                    }
+
+                    DiagnosticsLogger.Log(LogCategories.Core, "Recovered profile settings from the last valid backup.");
+                    return ApplyManagedSetupPolicy(backupSettings);
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticsLogger.LogException(LogCategories.Core, "Failed to load profile settings backup.", ex);
+                }
+            }
+
             string legacyPath = ResolveLegacyIniPath();
             if (!string.IsNullOrEmpty(legacyPath))
             {
                 try
                 {
+                    _automaticSaveBlocked = primaryExists || backupExists;
                     return ApplyManagedSetupPolicy(LoadFromIniFile(legacyPath));
                 }
                 catch (Exception ex)
@@ -88,24 +165,66 @@ namespace NcTalkOutlookAddIn.Settings
                     DiagnosticsLogger.LogException(LogCategories.Core, "Failed to load legacy settings INI.", ex);
                 }
             }
+
+            _automaticSaveBlocked = primaryExists || backupExists;
+            if (_automaticSaveBlocked)
+            {
+                DiagnosticsLogger.Log(
+                    LogCategories.Core,
+                    "No valid settings file could be recovered; automatic saves are blocked until the user saves settings explicitly.");
+            }
             return ApplyManagedSetupPolicy(new AddinSettings());
         }
 
-        internal void Save(AddinSettings settings)
+        private void SaveCore(AddinSettings settings, bool userInitiated)
         {
             if (settings == null)
             {
                 settings = new AddinSettings();
             }
+            if (_automaticSaveBlocked && !userInitiated)
+            {
+                DiagnosticsLogger.Log(
+                    LogCategories.Core,
+                    "Automatic settings save skipped because the last settings load was not fully recoverable.");
+                return;
+            }
+
             try
             {
-                Directory.CreateDirectory(_dataDirectory);
-                SaveToXmlFile(_filePath, ApplyManagedSetupPolicy(settings.Clone()), _profileName);
+                AddinSettings persistedSettings = ApplyManagedSetupPolicy(settings.Clone());
+                using (_settingsFileTransaction.AcquireLock())
+                {
+                    _settingsFileTransaction.Commit(
+                        stream => SaveToXmlStream(stream, persistedSettings, _profileName),
+                        IsSettingsFileHealthy);
+                    _automaticSaveBlocked = false;
+                }
             }
             catch (Exception ex)
             {
                 DiagnosticsLogger.LogException(LogCategories.Core, "Failed to save profile settings XML.", ex);
                 throw;
+            }
+        }
+
+        private void TryRestorePrimarySettingsFromBackup()
+        {
+            try
+            {
+                if (!_settingsFileTransaction.TryRestorePrimaryFromBackup(IsSettingsFileHealthy))
+                {
+                    DiagnosticsLogger.Log(
+                        LogCategories.Core,
+                        "Profile settings backup was readable but could not be restored to the primary file.");
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLogger.LogException(
+                    LogCategories.Core,
+                    "Failed to restore profile settings backup to the primary file.",
+                    ex);
             }
         }
 
@@ -395,6 +514,13 @@ namespace NcTalkOutlookAddIn.Settings
 
         private static AddinSettings LoadFromXmlFile(string path)
         {
+            bool passwordReadFailed;
+            return LoadFromXmlFile(path, out passwordReadFailed);
+        }
+
+        private static AddinSettings LoadFromXmlFile(string path, out bool passwordReadFailed)
+        {
+            passwordReadFailed = false;
             var settings = new AddinSettings();
             var document = new XmlDocument();
             document.Load(path);
@@ -416,7 +542,28 @@ namespace NcTalkOutlookAddIn.Settings
 
                 if (string.Equals(key, "AppPasswordProtected", StringComparison.OrdinalIgnoreCase))
                 {
-                    settings.AppPassword = UnprotectPassword(value);
+                    try
+                    {
+                        settings.AppPassword = UnprotectPassword(value);
+                    }
+                    catch (FormatException ex)
+                    {
+                        passwordReadFailed = true;
+                        settings.AppPassword = string.Empty;
+                        DiagnosticsLogger.LogException(
+                            LogCategories.Core,
+                            "Stored app password is not valid DPAPI data.",
+                            ex);
+                    }
+                    catch (CryptographicException ex)
+                    {
+                        passwordReadFailed = true;
+                        settings.AppPassword = string.Empty;
+                        DiagnosticsLogger.LogException(
+                            LogCategories.Core,
+                            "Stored app password could not be decrypted for the current Windows user.",
+                            ex);
+                    }
                     continue;
                 }
                 if (string.Equals(key, "AppPassword", StringComparison.OrdinalIgnoreCase))
@@ -442,6 +589,17 @@ namespace NcTalkOutlookAddIn.Settings
         }
 
         private static void SaveToXmlFile(string path, AddinSettings settings, string profileName)
+        {
+            var transaction = new SettingsFileTransaction(path);
+            using (transaction.AcquireLock())
+            {
+                transaction.Commit(
+                    stream => SaveToXmlStream(stream, settings, profileName),
+                    IsSettingsFileHealthy);
+            }
+        }
+
+        private static void SaveToXmlStream(Stream stream, AddinSettings settings, string profileName)
         {
             var document = new XmlDocument();
             XmlDeclaration declaration = document.CreateXmlDeclaration("1.0", "utf-8", null);
@@ -517,9 +675,23 @@ namespace NcTalkOutlookAddIn.Settings
                 Encoding = new UTF8Encoding(false)
             };
 
-            using (var writer = XmlWriter.Create(path, writerSettings))
+            using (var writer = XmlWriter.Create(stream, writerSettings))
             {
                 document.Save(writer);
+            }
+        }
+
+        private static bool IsSettingsFileHealthy(string path)
+        {
+            try
+            {
+                bool passwordReadFailed;
+                LoadFromXmlFile(path, out passwordReadFailed);
+                return !passwordReadFailed;
+            }
+            catch
+            {
+                return false;
             }
         }
 
