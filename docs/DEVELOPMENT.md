@@ -306,8 +306,9 @@ Compose runtime parity additions in `NextcloudTalkAddIn.cs` (`MailComposeSubscri
   - inline compose keeps `Explorer.InlineResponseClose` as a surface-transition signal because Outlook also raises it for pop-out and navigation. `ItemEvents_10.Unload` remains the terminal item signal for an inline response and evaluates only previously captured cleanup state without reading the unloaded `MailItem`.
   - DAV cleanup uses the shared bounded FileLink retry path. A repeated delete remains idempotent because an already absent folder is accepted.
   - cleanup tracking is held in memory. Once Outlook has written the message, deleting that saved draft later or after an Outlook restart does not delete the share; the unused share must be removed manually.
+  - `RegisterSeparatePasswordDispatch` initially keeps the password follow-up data only in the subscription's `_passwordDispatchQueue`. Save and AutoSave do not serialize that queue into the primary mail. Closing the compose window disposes the subscription, so a reopened draft, an Outlook restart before the first send attempt, or a new message created from an `.oft` template cannot restore the follow-up state.
   - before Outlook accepts a primary send with separate password delivery, `PendingPasswordDraftController` creates and saves the complete follow-up drafts, protects their payloads with Windows DPAPI, records the exact `SaveSentMessageFolder`, writes a unique attempt marker to the primary item, and then arms the drafts. A persistence failure cancels the primary send.
-  - only an `ItemAdd` event or restart scan that finds the marked primary item with `MailItem.Sent=true` in that exact folder confirms delivery. Delayed or offline Outbox delivery therefore remains pending.
+  - `OnSend` is the persistence boundary. Outlook's built-in delayed delivery still passes through this event before the primary mail enters the Outbox. Only an `ItemAdd` event or restart scan that finds the marked primary item with `MailItem.Sent=true` in the exact folder confirms delivery, so delayed or offline Outbox delivery remains pending and survives an Outlook restart after the send attempt.
   - the send gate also cancels an enforcing attachment policy while an ordinary attachment still violates it.
 - Separate password-mail dispatch:
   - queue password-only content after share creation and persist the origin settings needed by later Secrets requests
@@ -512,7 +513,7 @@ Suggested smoke test sequence:
 4. Calendar: add attendees, save again (participant sync).
 5. Mail: run the sharing wizard, upload 1–2 small files, insert the HTML block, and send to yourself.
 6. Mail: insert a share and discard the message before it is saved; verify that the exact server folder is removed. Repeat with Save or AutoSave and verify that the share remains.
-7. Mail: check a saved draft and a delayed-send message; the share remains, while a password follow-up stays pending until Sent Items confirmation.
+7. Mail: with separate password delivery, create the share and click Send from the same compose window. Repeat with Outlook delayed delivery and restart Outlook while the primary mail remains in the Outbox; the prepared follow-up must stay pending until Sent Items confirmation. A closed and reopened primary draft or an `.oft` template with an existing share block is outside the supported flow and requires a new share before sending.
 8. IFB: enable IFB, verify the URL reservation and TCP listener, then use Outlook's Scheduling Assistant with an address from the Nextcloud system address book. A direct request without the profile secret is expected to return `404`.
 9. Settings -> Advanced: click `Check now` and verify that latest version, last check, download link, and changelog summary update without blocking Outlook.
 

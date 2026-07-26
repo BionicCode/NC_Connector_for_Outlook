@@ -39,9 +39,7 @@ Key points:
 - attachment automation for large attachments or always through NC Connector, with a selectable `ZIP download` (default) or `Nextcloud share page` link target
 - one local scan builds a root-relative upload plan; the destination root is created atomically, and attachment automation tries numbered names after a collision without a preliminary server probe
 - folders are prepared once; up to three direct transfers run in parallel, files over 20 MiB use chunked upload v2, and small-file sets use DAV bulk upload only when Nextcloud advertises version `1.0` and the complete plan saves at least 20 percent of its requests
-- separate password mails are sent only after the primary mail was sent successfully
-- delayed send, drafts, pending cleanup, and password follow-ups survive an Outlook restart
-- if auto-send fails, NC Connector opens a prepared manual password mail
+- optional separate password delivery through NC Connector Backend
 
 ## Talk
 

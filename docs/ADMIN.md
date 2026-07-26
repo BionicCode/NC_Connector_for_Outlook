@@ -558,16 +558,18 @@ After a share block is inserted, NC Connector tracks the newly created server sh
 - Deleting a draft that Outlook has already saved is not tracked. Remove its unused share manually in Nextcloud.
 - If the share block cannot be inserted, the wizard reports failure and immediately attempts to remove the newly created server folder with the captured account context.
 - An enforcing attachment policy blocks sending while a normal attachment that should have been routed through NC Connector remains in the message.
-- Separate password delivery is handled independently through saved Outlook drafts as described below.
+- Separate password delivery uses its own saved Outlook drafts after the user clicks **Send**, as described below.
 
 ### Separate password delivery
 
 Separate password delivery requires NC Connector Backend and an active seat.
 
 - The primary mail contains no plain password.
+- Separate password delivery is tied to the open compose session in which the share was created. The user must click **Send** from that same, still-open message. Saving or AutoSave does not interrupt the flow while the compose window remains open.
+- Saving the primary mail as a draft or `.oft` template and then closing it is not supported. Reopening that draft, restarting Outlook before the first send attempt, or creating a message from that template restores the visible share block, but not the password follow-up state. No password follow-up is created; create a new share in the final message before sending it.
 - Before Outlook accepts the primary send, the complete password follow-up is saved as an Outlook draft. If that draft cannot be saved safely, the primary send is cancelled.
 - The follow-up starts only after Outlook positively confirms the primary mail in the exact Sent folder selected for that message.
-- Delayed send, offline Outbox items, and an Outlook restart keep the follow-up pending.
+- Outlook's built-in delayed delivery is supported after **Send** has been clicked in the original compose session. Offline Outbox items and an Outlook restart after that send attempt keep the prepared follow-up pending until the primary mail appears in the exact Sent folder.
 - Automatic sending is attempted with the same effective sender.
 - If sender verification or automatic sending fails, Outlook opens that same prepared draft for manual sending; it does not create a duplicate.
 - With the Secrets mode, one one-time Secret link is created per final recipient.

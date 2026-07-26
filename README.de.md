@@ -40,9 +40,7 @@ Weitere Punkte:
 - Anhangsautomatisierung für große Anhänge oder immer über NC Connector, mit wählbarem Linkziel `ZIP-Download` (Standard) oder `Nextcloud-Freigabeseite`
 - ein lokaler Scan erstellt einen relativ zum Freigabeordner aufgebauten Uploadplan; der Zielordner wird atomar angelegt und die Anhangsautomatisierung probiert bei einer Kollision nummerierte Namen ohne vorherige Server-Abfrage
 - Ordner werden einmal vorbereitet; bis zu drei direkte Transfers laufen parallel, Dateien über 20 MiB verwenden Chunked Upload v2 und Gruppen kleiner Dateien nutzen DAV-Bulk nur bei Capability-Version `1.0` und mindestens 20 Prozent weniger Requests im vollständigen Plan
-- separate Passwortmails werden erst nach erfolgreichem Versand der Hauptmail verschickt
-- verzögerter Versand, Entwürfe, offene Bereinigung und Passwort-Follow-ups überstehen einen Outlook-Neustart
-- bei Auto-Send-Fehlern öffnet sich eine vorbereitete manuelle Passwortmail
+- optionale separate Passwortzustellung über das NC Connector Backend
 
 ## Talk
 

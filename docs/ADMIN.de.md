@@ -558,16 +558,18 @@ Nach dem Einfügen eines Freigabeblocks verfolgt NC Connector die neu erstellte 
 - Das spätere Löschen eines bereits von Outlook gespeicherten Entwurfs wird nicht verfolgt. Seine ungenutzte Freigabe muss manuell in Nextcloud entfernt werden.
 - Kann der Freigabeblock nicht eingefügt werden, meldet der Wizard einen Fehler und versucht sofort, den neu erzeugten Serverordner mit dem erfassten Kontokontext zu entfernen.
 - Eine erzwingende Anhangs-Policy blockiert den Versand, solange ein normaler Anhang in der Nachricht verbleibt, der über NC Connector hätte laufen müssen.
-- Die separate Passwortzustellung wird unabhängig davon über gespeicherte Outlook-Entwürfe behandelt.
+- Die separate Passwortzustellung verwendet nach dem Klick auf **Senden** eigene gespeicherte Outlook-Entwürfe, wie im folgenden Abschnitt beschrieben.
 
 ### Separate Passwortzustellung
 
 Separate Passwortzustellung benötigt NC Connector Backend und einen aktiven Seat.
 
 - Die Hauptmail enthält kein Klartextpasswort.
+- Die separate Passwortzustellung ist an die geöffnete Verfassen-Sitzung gebunden, in der die Freigabe erstellt wurde. Der Benutzer muss in genau dieser weiterhin geöffneten Nachricht auf **Senden** klicken. Speichern und AutoSave unterbrechen den Ablauf nicht, solange das Verfassen-Fenster geöffnet bleibt.
+- Das Speichern der Hauptmail als Entwurf oder `.oft`-Vorlage mit anschließendem Schließen wird nicht unterstützt. Beim erneuten Öffnen des Entwurfs, einem Outlook-Neustart vor dem ersten Sendeversuch oder einer neuen Nachricht aus dieser Vorlage bleibt der sichtbare Freigabeblock erhalten, der Zustand für die Passwortzustellung jedoch nicht. Es wird keine Passwort-Follow-up-Mail erstellt; vor dem Versand muss in der endgültigen Nachricht eine neue Freigabe erstellt werden.
 - Bevor Outlook den Versand der Hauptmail annimmt, wird der vollständige Passwort-Follow-up als Outlook-Entwurf gespeichert. Kann dieser Entwurf nicht sicher gespeichert werden, wird der Versand der Hauptmail abgebrochen.
 - Die Follow-up-Mail startet erst, nachdem Outlook die Hauptmail eindeutig in dem für diese Nachricht ausgewählten exakten Gesendet-Ordner bestätigt hat.
-- „Später senden“, Offline-Postausgang und Outlook-Neustart lassen das Follow-up ausstehend.
+- Outlooks integrierte verzögerte Übermittlung („Später senden“) wird unterstützt, nachdem in der ursprünglichen Verfassen-Sitzung auf **Senden** geklickt wurde. Offline-Postausgang und ein Outlook-Neustart nach diesem Sendeversuch lassen den vorbereiteten Follow-up ausstehend, bis die Hauptmail im exakten Gesendet-Ordner erscheint.
 - Der automatische Versand wird mit demselben wirksamen Absender versucht.
 - Schlägt die Absenderprüfung oder der automatische Versand fehl, öffnet Outlook genau diesen vorbereiteten Entwurf zum manuellen Senden; es entsteht kein Duplikat.
 - Im Secrets-Modus wird für jeden endgültigen Empfänger ein eigener einmaliger Secret-Link erstellt.
