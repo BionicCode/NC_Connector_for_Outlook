@@ -456,7 +456,7 @@ Backendverwaltete Funktionen benötigen:
 Beobachtbares Verhalten je Zustand:
 
 - **Keine Backend-Konfiguration:** Freigaben, Talk und IFB verwenden lokale Einstellungen. Zentrale Signaturen und separate Passwortzustellung sind nicht verfügbar.
-- **Erreichbares Backend mit aktivem Seat:** Backend-Vorgaben gelten. Als gesperrt markierte Felder können in Outlook nicht geändert werden.
+- **Erreichbares Backend mit aktivem Seat:** Gespeicherte Outlook-Werte gelten für editierbare Felder. Gesperrte Backend-Werte überschreiben den lokalen Wert und können in Outlook nicht geändert werden.
 - **Erreichbares Backend ohne nutzbaren Seat:** Freigaben und Talk verwenden lokale Einstellungen; Outlook zeigt den Seat- oder Lizenzstatus. Zentrale Signaturen und separate Passwortzustellung sind nicht verfügbar.
 - **Backend vorübergehend nicht erreichbar:** Freigaben und Talk verwenden gespeicherte lokale Einstellungen. Eine passende Mail mit verpflichtender zentraler Signatur kann geöffnet und ungesendet bleiben, bis die Signatur-Policy wieder geprüft werden kann.
 - **Backend ohne Signatur-Domain:** Freigabe- und Talk-Policies funktionieren weiter. Zentrale Signaturen bleiben deaktiviert und Outlook zeigt einen Update-Hinweis.
@@ -471,7 +471,7 @@ Das Backend kann verwalten:
 - separate Passwortzustellung und optionale Secret-Links
 - zentrale Signaturzuweisung sowie getrennte Schalter für neue Mail, Antwort und Weiterleitung
 
-Editierbare Werte als Organisationsvorgaben verwenden. Nur Einstellungen sperren, die Benutzer nicht ändern dürfen. Vor dem breiten Rollout sowohl einen Benutzer mit aktivem Seat als auch einen Benutzer ohne Seat testen.
+Werte editierbar lassen, wenn Benutzer ihre gespeicherte Outlook-Einstellung behalten oder ändern dürfen. Nur Einstellungen sperren, die Benutzer nicht ändern dürfen. Vor dem breiten Rollout sowohl einen Benutzer mit aktivem Seat als auch einen Benutzer ohne Seat testen.
 
 ### Vorlagen erstellen
 
@@ -481,6 +481,7 @@ Für eigene Freigabevorlagen:
 - manuelle Freigaben verwenden immer den Text für die Freigabeseite
 - die Anhangsautomatisierung kann Text für ZIP-Download oder Freigabeseite verwenden
 - Vorlagen ohne diese Variablen behalten ihren vorhandenen Text
+- feste Beschriftung und Platzhalter eines optionalen Felds, etwa `{PASSWORD}`, im selben `tr`, `p`, `li` oder `div` platzieren; Outlook entfernt diesen vollständigen Block, wenn der Wert leer ist
 - absolute `https://`-Links verwenden
 
 Für HTML in Talk-Terminen:

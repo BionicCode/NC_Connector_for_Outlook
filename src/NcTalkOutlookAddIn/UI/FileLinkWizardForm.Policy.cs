@@ -28,33 +28,40 @@ namespace NcTalkOutlookAddIn.UI
             string policyString;
 
             policyString = _backendPolicyStatus.GetPolicyString("share", "share_base_directory");
-            if (!string.IsNullOrWhiteSpace(policyString))
+            if (IsPolicyLocked("share_base_directory")
+                && !string.IsNullOrWhiteSpace(policyString))
             {
                 _request.BasePath = policyString;
             }
 
             policyString = _backendPolicyStatus.GetPolicyString("share", "share_name_template");
-            if (!string.IsNullOrWhiteSpace(policyString))
+            if (IsPolicyLocked("share_name_template")
+                && !string.IsNullOrWhiteSpace(policyString))
             {
                 _defaults.SharingDefaultShareName = policyString;
             }
-            if (_backendPolicyStatus.TryGetPolicyBool("share", "share_permission_upload", out policyBool))
+            if (IsPolicyLocked("share_permission_upload")
+                && _backendPolicyStatus.TryGetPolicyBool("share", "share_permission_upload", out policyBool))
             {
                 _defaults.SharingDefaultPermCreate = policyBool;
             }
-            if (_backendPolicyStatus.TryGetPolicyBool("share", "share_permission_edit", out policyBool))
+            if (IsPolicyLocked("share_permission_edit")
+                && _backendPolicyStatus.TryGetPolicyBool("share", "share_permission_edit", out policyBool))
             {
                 _defaults.SharingDefaultPermWrite = policyBool;
             }
-            if (_backendPolicyStatus.TryGetPolicyBool("share", "share_permission_delete", out policyBool))
+            if (IsPolicyLocked("share_permission_delete")
+                && _backendPolicyStatus.TryGetPolicyBool("share", "share_permission_delete", out policyBool))
             {
                 _defaults.SharingDefaultPermDelete = policyBool;
             }
-            if (_backendPolicyStatus.TryGetPolicyBool("share", "share_set_password", out policyBool))
+            if (IsPolicyLocked("share_set_password")
+                && _backendPolicyStatus.TryGetPolicyBool("share", "share_set_password", out policyBool))
             {
                 _defaults.SharingDefaultPasswordEnabled = policyBool;
             }
-            if (_backendPolicyStatus.TryGetPolicyBool("share", "share_send_password_separately", out policyBool))
+            if (IsPolicyLocked("share_send_password_separately")
+                && _backendPolicyStatus.TryGetPolicyBool("share", "share_send_password_separately", out policyBool))
             {
                 _defaults.SharingDefaultPasswordSeparateEnabled = policyBool;
             }
@@ -68,7 +75,8 @@ namespace NcTalkOutlookAddIn.UI
             {
                 _defaults.SharingDefaultPasswordSeparateEnabled = false;
             }
-            if (_backendPolicyStatus.TryGetPolicyInt("share", "share_expire_days", out policyInt))
+            if (IsPolicyLocked("share_expire_days")
+                && _backendPolicyStatus.TryGetPolicyInt("share", "share_expire_days", out policyInt))
             {
                 _defaults.SharingDefaultExpireDays = Math.Max(1, policyInt);
             }

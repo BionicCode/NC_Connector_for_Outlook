@@ -9,12 +9,14 @@ $SettingsTransactionPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Settin
 $SettingsWorkflowPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Controllers\SettingsWorkflowController.cs"
 $SettingsFormPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\UI\SettingsForm.cs"
 $AddinSettingsPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Settings\AddinSettings.cs"
+$FileLinkWizardPolicyPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\UI\FileLinkWizardForm.Policy.cs"
 
 $storage = Get-Content -Raw -Path $SettingsStoragePath
 $transaction = Get-Content -Raw -Path $SettingsTransactionPath
 $workflow = Get-Content -Raw -Path $SettingsWorkflowPath
 $settingsForm = Get-Content -Raw -Path $SettingsFormPath
 $settings = Get-Content -Raw -Path $AddinSettingsPath
+$fileLinkWizardPolicy = Get-Content -Raw -Path $FileLinkWizardPolicyPath
 $failures = New-Object System.Collections.Generic.List[string]
 
 $savedKeys = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
@@ -135,6 +137,36 @@ else {
     }
     if (-not ($refreshMethod -match 'Settings server state refresh failed\.[\s\S]{0,500}?return true;')) {
         $failures.Add("A settings server-state refresh exception must leave local settings save available.")
+    }
+}
+
+$wizardDefaultsStart = $fileLinkWizardPolicy.IndexOf("private void ApplyPolicyDefaultsToSettings", [StringComparison]::Ordinal)
+$wizardWarningStart = $fileLinkWizardPolicy.IndexOf("private void ApplyPolicyWarningUi", [StringComparison]::Ordinal)
+if ($wizardDefaultsStart -lt 0 -or $wizardWarningStart -le $wizardDefaultsStart) {
+    $failures.Add("FileLink wizard policy-default method could not be inspected.")
+}
+else {
+    $wizardDefaultsMethod = $fileLinkWizardPolicy.Substring(
+        $wizardDefaultsStart,
+        $wizardWarningStart - $wizardDefaultsStart)
+    $wizardDefaultBindings = @(
+        @{ Key = "share_base_directory"; Assignment = "_request\.BasePath\s*=" },
+        @{ Key = "share_name_template"; Assignment = "_defaults\.SharingDefaultShareName\s*=" },
+        @{ Key = "share_permission_upload"; Assignment = "_defaults\.SharingDefaultPermCreate\s*=" },
+        @{ Key = "share_permission_edit"; Assignment = "_defaults\.SharingDefaultPermWrite\s*=" },
+        @{ Key = "share_permission_delete"; Assignment = "_defaults\.SharingDefaultPermDelete\s*=" },
+        @{ Key = "share_set_password"; Assignment = "_defaults\.SharingDefaultPasswordEnabled\s*=" },
+        @{ Key = "share_send_password_separately"; Assignment = "_defaults\.SharingDefaultPasswordSeparateEnabled\s*=\s*policyBool" },
+        @{ Key = "share_expire_days"; Assignment = "_defaults\.SharingDefaultExpireDays\s*=" }
+    )
+    foreach ($binding in $wizardDefaultBindings) {
+        $escapedKey = [regex]::Escape($binding.Key)
+        $lockedAssignmentPattern =
+            'if\s*\(\s*IsPolicyLocked\("' + $escapedKey + '"\)[\s\S]{0,350}?' + $binding.Assignment
+        if (-not ($wizardDefaultsMethod -match $lockedAssignmentPattern)) {
+            $failures.Add(
+                "FileLink wizard must preserve a saved local '$($binding.Key)' default when the backend value is editable, while applying a locked backend value.")
+        }
     }
 }
 

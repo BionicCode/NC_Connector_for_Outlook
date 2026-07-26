@@ -456,7 +456,7 @@ Backend-managed functions require:
 Observed behavior by state:
 
 - **No backend configuration:** Sharing, Talk, and IFB use local settings. Central signatures and separate password delivery are unavailable.
-- **Reachable backend with active seat:** Backend defaults apply. Fields marked as locked cannot be changed in Outlook.
+- **Reachable backend with active seat:** Saved Outlook values control editable fields. Locked backend values override the local value and cannot be changed in Outlook.
 - **Reachable backend without a usable seat:** Sharing and Talk use local settings; Outlook displays the seat or license state. Central signatures and separate password delivery are unavailable.
 - **Backend temporarily unreachable:** Sharing and Talk use saved local settings. A matching message that requires a central signature can remain open and unsent until the signature policy can be checked.
 - **Backend lacks the signature domain:** Share and Talk policies continue to work. Central signatures stay disabled and Outlook displays an update notice.
@@ -471,7 +471,7 @@ The backend can manage:
 - separate password delivery and optional Secret links
 - central signature assignment and separate switches for new mail, reply, and forward
 
-Use editable values as organization defaults. Lock only settings that users must not change. Test both a user with an active seat and a user without one before broad rollout.
+Keep values editable when users may retain or change their saved Outlook setting. Lock only settings that users must not change. Test both a user with an active seat and a user without one before broad rollout.
 
 ### Template authoring
 
@@ -481,6 +481,7 @@ For custom share templates:
 - manual shares always use share-page wording
 - attachment automation can use ZIP-download or share-page wording
 - templates without these variables keep their existing wording
+- place an optional field's fixed label and placeholder, such as `{PASSWORD}`, in the same `tr`, `p`, `li`, or `div`; Outlook removes that complete block when the value is empty
 - use absolute `https://` links
 
 For Talk appointment HTML:

@@ -56,6 +56,8 @@ internal static class OutlookFileLinkRenderingTests
         TestManualShareIgnoresAttachmentTarget();
         TestInvalidZipUrlFailsVisibly();
         TestCustomTemplateResolvesModeAwareLinkVariables();
+        TestCustomTemplatePrunesEmptyDynamicBlocks();
+        TestCustomTemplateKeepsPasswordContent();
         TestBackendEffectiveLanguageLocalizesCustomTemplateCopy();
         TestOlderBackendModeAwareTemplateStillRenders();
         TestLegacyCustomTemplateStillRenders();
@@ -201,6 +203,182 @@ internal static class OutlookFileLinkRenderingTests
 
         Check("Legacy custom template still resolves its existing URL variable", plainText.Contains("Legacy link: https://cloud.example.test/nc/s/AbCd1234"), plainText);
         Check("Legacy custom template is not forced to contain new variables", !plainText.Contains("LINK_INTRO") && !plainText.Contains("LINK_LABEL"), plainText);
+    }
+
+    private static void TestCustomTemplatePrunesEmptyDynamicBlocks()
+    {
+        const string template =
+            "<table>"
+            + "<tr><th>PW-LABEL</th><td><span>{PASSWORD}</span></td></tr>"
+            + "<tr><th>EXP-LABEL</th><td>{EXPIRATIONDATE}</td></tr>"
+            + "<tr><th>RIGHTS-LABEL</th><td>{RIGHTS}</td></tr>"
+            + "</table>"
+            + "<p>PW-PARAGRAPH: {PASSWORD}</p>"
+            + "<p>NOTE-LABEL: {NOTE}</p>"
+            + "<p>LINK-LABEL: {URL}</p>";
+        BackendPolicyStatus policy = BuildCustomTemplatePolicy(
+            template,
+            template,
+            "en");
+        var result = new FileLinkResult(
+            "https://cloud.example.test/nc/s/AbCd1234",
+            "42",
+            "AbCd1234",
+            string.Empty,
+            null,
+            FileLinkPermissionFlags.Read | FileLinkPermissionFlags.Create,
+            "Folder",
+            "NC Connector/Folder");
+        var manualRequest = new FileLinkRequest
+        {
+            PasswordEnabled = false,
+            NoteEnabled = false,
+            Permissions =
+                FileLinkPermissionFlags.Read
+                | FileLinkPermissionFlags.Create
+        };
+        FileLinkRequest attachmentRequest = BuildAttachmentRequest();
+
+        string manualHtml = FileLinkHtmlBuilder.Build(
+            result,
+            manualRequest,
+            "custom",
+            policy);
+        string manualPlainText = FileLinkHtmlBuilder.BuildPlainText(
+            result,
+            manualRequest,
+            "custom",
+            policy);
+        string attachmentHtml = FileLinkHtmlBuilder.Build(
+            result,
+            attachmentRequest,
+            "custom",
+            policy);
+        string attachmentPlainText = FileLinkHtmlBuilder.BuildPlainText(
+            result,
+            attachmentRequest,
+            "custom",
+            policy);
+
+        foreach (string output in new[] {
+            manualHtml,
+            manualPlainText,
+            attachmentHtml,
+            attachmentPlainText
+        })
+        {
+            Check(
+                "Custom template removes an empty password block",
+                !output.Contains("PW-LABEL")
+                    && !output.Contains("PW-PARAGRAPH")
+                    && !output.Contains("{PASSWORD}"),
+                output);
+            Check(
+                "Custom template removes an empty expiration block",
+                !output.Contains("EXP-LABEL")
+                    && !output.Contains("{EXPIRATIONDATE}"),
+                output);
+            Check(
+                "Custom template removes an empty note block",
+                !output.Contains("NOTE-LABEL")
+                    && !output.Contains("{NOTE}"),
+                output);
+            Check(
+                "Custom template keeps a populated link block",
+                output.Contains("LINK-LABEL")
+                    && output.Contains("AbCd1234"),
+                output);
+        }
+        foreach (string output in new[] { manualHtml, manualPlainText })
+        {
+            Check(
+                "Custom manual template keeps populated rights",
+                output.Contains("RIGHTS-LABEL")
+                    && output.Contains("Upload"),
+                output);
+        }
+        foreach (string output in new[] {
+            attachmentHtml,
+            attachmentPlainText
+        })
+        {
+            Check(
+                "Custom attachment template removes hidden rights",
+                !output.Contains("RIGHTS-LABEL")
+                    && !output.Contains("{RIGHTS}"),
+                output);
+        }
+    }
+
+    private static void TestCustomTemplateKeepsPasswordContent()
+    {
+        const string template =
+            "<table><tr><th>PW-LABEL</th>"
+            + "<td><span>{PASSWORD}</span></td></tr></table>"
+            + "<p>LINK-LABEL: {URL}</p>";
+        BackendPolicyStatus policy = BuildCustomTemplatePolicy(
+            template,
+            template,
+            "en");
+        FileLinkResult result = BuildResult(
+            "https://cloud.example.test/nc/s/AbCd1234",
+            "AbCd1234",
+            "Secret!");
+        var directRequest = new FileLinkRequest
+        {
+            PasswordEnabled = true,
+            PasswordSeparateEnabled = false,
+            Permissions = FileLinkPermissionFlags.Read
+        };
+        var separateRequest = new FileLinkRequest
+        {
+            PasswordEnabled = true,
+            PasswordSeparateEnabled = true,
+            Permissions = FileLinkPermissionFlags.Read
+        };
+
+        string directHtml = FileLinkHtmlBuilder.Build(
+            result,
+            directRequest,
+            "custom",
+            policy);
+        string directPlainText = FileLinkHtmlBuilder.BuildPlainText(
+            result,
+            directRequest,
+            "custom",
+            policy);
+        string separateHtml = FileLinkHtmlBuilder.Build(
+            result,
+            separateRequest,
+            "custom",
+            policy);
+        string separatePlainText = FileLinkHtmlBuilder.BuildPlainText(
+            result,
+            separateRequest,
+            "custom",
+            policy);
+
+        foreach (string output in new[] { directHtml, directPlainText })
+        {
+            Check(
+                "Custom template keeps a populated password block",
+                output.Contains("PW-LABEL")
+                    && output.Contains("Secret!"),
+                output);
+        }
+        foreach (string output in new[] {
+            separateHtml,
+            separatePlainText
+        })
+        {
+            Check(
+                "Custom template keeps the separate-password hint",
+                output.Contains("PW-LABEL")
+                    && output.Contains(
+                        "The password will be sent in a separate email.")
+                    && !output.Contains("Secret!"),
+                output);
+        }
     }
 
     private static void TestBackendEffectiveLanguageLocalizesCustomTemplateCopy()
