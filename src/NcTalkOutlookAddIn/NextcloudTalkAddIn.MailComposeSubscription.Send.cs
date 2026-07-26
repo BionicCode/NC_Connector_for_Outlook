@@ -15,10 +15,9 @@ namespace NcTalkOutlookAddIn
 {
     public sealed partial class NextcloudTalkAddIn
     {
+        // Handles send validation and separate-password preparation.
         internal sealed partial class MailComposeSubscription
         {
-            private const int SurfaceCloseVerificationMaxAttempts = 8;
-
             private void OnSend(ref bool cancel)
             {
                 if (_disposed || cancel)
@@ -51,76 +50,12 @@ namespace NcTalkOutlookAddIn
                     }
                 }
 
-                _cleanupGraceTimer.Stop();
                 LogFileLink(
                     "Compose send armed for positive Sent confirmation (composeKey="
                     + _composeKey
                     + ", passwordQueued="
                     + _passwordDispatchQueue.Count.ToString(CultureInfo.InvariantCulture)
                     + ").");
-            }
-
-            private void OnClose(ref bool cancel)
-            {
-                if (_disposed)
-                {
-                    return;
-                }
-
-                ScheduleSurfaceCloseVerification(
-                    cancel ? "close_already_cancelled" : "close_event");
-            }
-
-            private void ScheduleSurfaceCloseVerification(string reason)
-            {
-                if (_disposed)
-                {
-                    return;
-                }
-
-                _surfaceCloseVerificationAttempts = 0;
-                _cleanupGraceTimer.Stop();
-                _cleanupGraceTimer.Interval = 250;
-                _cleanupGraceTimer.Start();
-                LogFileLink(
-                    "Compose surface-close verification scheduled (composeKey="
-                    + _composeKey
-                    + ", reason="
-                    + (reason ?? string.Empty)
-                    + ").");
-            }
-
-            private void OnCleanupGraceTimerTick(object sender, EventArgs e)
-            {
-                _cleanupGraceTimer.Stop();
-                if (_disposed)
-                {
-                    return;
-                }
-
-                _surfaceCloseVerificationAttempts++;
-                if (_owner.IsMailComposeSurfaceOpen(_mail))
-                {
-                    _surfaceCloseVerificationAttempts = 0;
-                    LogFileLink(
-                        "Compose surface remains open; close cleanup cancelled (composeKey="
-                        + _composeKey
-                        + ").");
-                    return;
-                }
-
-                if (_surfaceCloseVerificationAttempts
-                    < SurfaceCloseVerificationMaxAttempts)
-                {
-                    _cleanupGraceTimer.Start();
-                    return;
-                }
-
-                LogFileLink(
-                    "Compose surface closed; unknown state retained without destructive cleanup (composeKey="
-                    + _composeKey
-                    + ").");
-                Dispose();
             }
 
             private void CapturePasswordDispatchRecipients()

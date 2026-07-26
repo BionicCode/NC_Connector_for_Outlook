@@ -98,8 +98,9 @@ Key code locations:
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.cs` — compose subscription core state + lifecycle entry points (`Dispose`, identity, shared helpers)
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.AttachmentFlow.cs` — compose attachment interception/evaluation/share-launch flow
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Signature.cs` — backend email-signature policy application for the matching Outlook sender account
-- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs` — send gate, surface-close handling, and durable separate-password arming
-- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.ComposeLifecycle.cs` — composition-root bridge for deterministic insertion-failure cleanup and confirmed password dispatch
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Send.cs` — send gate and durable separate-password arming
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.ShareCleanup.cs` — `AfterWrite`, `Inspector.Close`, and inline `Unload` handling for newly inserted shares
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.ComposeLifecycle.cs` — composition-root bridge for queued share cleanup and confirmed password dispatch
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.AppointmentSubscription.cs` — appointment runtime subscription lifecycle
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkAppointmentSync.cs` — STA capture and background dispatch for appointment changes
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkRoomLifecycle.cs` — startup, recovery, and teardown for tracked Talk rooms
@@ -107,7 +108,8 @@ Key code locations:
 - `src/NcTalkOutlookAddIn/Controllers/FileLinkLaunchController.cs` — FileLink ribbon launch + wizard orchestration
 - `src/NcTalkOutlookAddIn/Controllers/TalkRibbonController.cs` — Talk ribbon flow orchestration (auth gate, wizard, room create/replace)
 - `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` with `Lifecycle` and `Sync` partials — appointment metadata, local snapshot capture, and remote room updates
-- `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` — deterministic deletion of server artifacts when a newly created share cannot be inserted, plus password-mail body, recipient, sender, Secrets, and signature preparation
+- `src/NcTalkOutlookAddIn/Controllers/ComposeShareCleanupTracker.cs` — in-memory pending-write state for newly inserted compose shares
+- `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` — exact-origin deletion of unpersisted or insertion-failed server artifacts, plus password-mail body, recipient, sender, Secrets, and signature preparation
 - `src/NcTalkOutlookAddIn/Controllers/PendingPasswordDraftController.cs` — saved Outlook password drafts, exact Sent-folder subscriptions, restart recovery, and automatic/manual follow-up dispatch
 - `src/NcTalkOutlookAddIn/Controllers/TalkDescriptionTemplateController.cs` — Talk template/body block rendering
 - `src/NcTalkOutlookAddIn/Controllers/OutlookRecipientResolverController.cs` — SMTP and attendee recipient resolution
@@ -297,8 +299,13 @@ Compose runtime parity additions in `NextcloudTalkAddIn.cs` (`MailComposeSubscri
   - copies the effective attachment link target into `FileLinkRequest`; no per-share target switch is exposed.
 - `UI/FileLinkWizardForm.cs` file-step queue accepts Explorer drag & drop for files/folders across queue and action-area controls.
 - Compose insertion and pending-password lifecycle:
-  - `ComposeLifecycleOrigin` retains the exact server/account origin needed for a deterministic cleanup or later Secrets request.
-  - if a newly created share cannot be inserted into the message, the controller deletes its server folder with that captured origin. A successful insertion is not deleted later from an ambiguous close or folder-absence signal; Outlook cannot reliably distinguish discard, delayed send, a custom Drafts/Outbox folder, and inline pop-out in that situation.
+  - `ComposeLifecycleOrigin` retains the exact server/account origin needed to delete the created share or issue a later Secrets request. Cleanup never falls back to the currently selected account.
+  - if a newly created share cannot be inserted into the message, the controller attempts to delete its server folder with that captured origin.
+  - after successful insertion, `MailComposeSubscription` tracks its `ComposeShareCleanupRecord` until Outlook raises `AfterWrite`. A completed write covers Save, AutoSave, and the write performed for Send/Outbox, so those paths release the cleanup record without deleting the share.
+  - classic compose windows bind the concrete `InspectorEvents_10.Close` event. It fires only when that Inspector actually closes; if no successful write followed the insertion, the subscription queues deletion using the captured account and relative path. A cancelled close therefore keeps the share state armed.
+  - inline compose keeps `Explorer.InlineResponseClose` as a surface-transition signal because Outlook also raises it for pop-out and navigation. `ItemEvents_10.Unload` remains the terminal item signal for an inline response and evaluates only previously captured cleanup state without reading the unloaded `MailItem`.
+  - DAV cleanup uses the shared bounded FileLink retry path. A repeated delete remains idempotent because an already absent folder is accepted.
+  - cleanup tracking is held in memory. Once Outlook has written the message, deleting that saved draft later or after an Outlook restart does not delete the share; the unused share must be removed manually.
   - before Outlook accepts a primary send with separate password delivery, `PendingPasswordDraftController` creates and saves the complete follow-up drafts, protects their payloads with Windows DPAPI, records the exact `SaveSentMessageFolder`, writes a unique attempt marker to the primary item, and then arms the drafts. A persistence failure cancels the primary send.
   - only an `ItemAdd` event or restart scan that finds the marked primary item with `MailItem.Sent=true` in that exact folder confirms delivery. Delayed or offline Outbox delivery therefore remains pending.
   - the send gate also cancels an enforcing attachment policy while an ordinary attachment still violates it.
@@ -504,9 +511,10 @@ Suggested smoke test sequence:
 3. Calendar: restart Outlook, open the same appointment, change start time and save again (persistent metadata + lobby update).
 4. Calendar: add attendees, save again (participant sync).
 5. Mail: run the sharing wizard, upload 1–2 small files, insert the HTML block, and send to yourself.
-6. Mail: check a saved draft and a delayed-send message; password follow-up and share remain pending until Sent Items confirmation.
-7. IFB: enable IFB, verify the URL reservation and TCP listener, then use Outlook's Scheduling Assistant with an address from the Nextcloud system address book. A direct request without the profile secret is expected to return `404`.
-8. Settings -> Advanced: click `Check now` and verify that latest version, last check, download link, and changelog summary update without blocking Outlook.
+6. Mail: insert a share and discard the message before it is saved; verify that the exact server folder is removed. Repeat with Save or AutoSave and verify that the share remains.
+7. Mail: check a saved draft and a delayed-send message; the share remains, while a password follow-up stays pending until Sent Items confirmation.
+8. IFB: enable IFB, verify the URL reservation and TCP listener, then use Outlook's Scheduling Assistant with an address from the Nextcloud system address book. A direct request without the profile secret is expected to return `404`.
+9. Settings -> Advanced: click `Check now` and verify that latest version, last check, download link, and changelog summary update without blocking Outlook.
 
 ## X-NCTALK-* property reference
 

@@ -36,8 +36,6 @@ namespace NcTalkOutlookAddIn.Models
 
         internal SharePasswordDeliveryMode DeliveryMode { get; set; }
 
-        internal bool DeliveryPrepared { get; set; }
-
         internal int SecretsExpireDays { get; set; }
 
         internal string LanguageOverride { get; set; }

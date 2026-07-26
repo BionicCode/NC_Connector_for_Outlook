@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path $ProjectRoot).Path
 $SourceRoot = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn"
 $SignaturePath = Join-Path $SourceRoot "NextcloudTalkAddIn.MailComposeSubscription.Signature.cs"
-$SendPath = Join-Path $SourceRoot "NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs"
+$SendPath = Join-Path $SourceRoot "NextcloudTalkAddIn.MailComposeSubscription.Send.cs"
 $ComposeSubscriptionPath = Join-Path $SourceRoot "NextcloudTalkAddIn.MailComposeSubscription.cs"
 $InteropPath = Join-Path $SourceRoot "Controllers\MailInteropController.cs"
 $PasswordDispatchPath = Join-Path $SourceRoot "Controllers\ComposeShareLifecycleController.cs"
@@ -216,25 +216,28 @@ foreach ($required in @(
     Require-Pattern $SignatureSource $required.Pattern $required.Message
 }
 
+$inlineSurfaceExpression =
+    '_composeSurfaceState\s*==\s*ComposeSurfaceState\.InlineResponse'
+
 $signatureApplyPolicy = Get-CSharpMethodBlock $SignatureSource 'ApplyEmailSignaturePolicy'
 if ($null -eq $signatureApplyPolicy) {
     Add-Failure 'ApplyEmailSignaturePolicy could not be parsed.'
 } else {
-    Require-Pattern $signatureApplyPolicy '\.ApplyManagedEmailSignature\(\s*_mail\s*,\s*_isInlineResponse\s*,[\s\S]*?_composeKey\s*,[\s\S]*?_inlineExplorerIdentityKey\s*\)' 'Managed signature application does not forward the tracked inline Explorer identity.'
+    Require-Pattern $signatureApplyPolicy ('\.ApplyManagedEmailSignature\(\s*_mail\s*,\s*' + $inlineSurfaceExpression + '\s*,[\s\S]*?_composeKey\s*,[\s\S]*?_inlineExplorerIdentityKey\s*\)') 'Managed signature application does not forward the tracked inline Explorer identity.'
 }
 
 $signatureClearManaged = Get-CSharpMethodBlock $SignatureSource 'ClearManagedEmailSignature'
 if ($null -eq $signatureClearManaged) {
     Add-Failure 'ClearManagedEmailSignature could not be parsed.'
 } else {
-    Require-Pattern $signatureClearManaged '\.ClearManagedEmailSignature\(\s*_mail\s*,\s*_isInlineResponse\s*,\s*_composeKey\s*,[\s\S]*?_inlineExplorerIdentityKey\s*\)' 'Managed signature cleanup does not forward the tracked inline Explorer identity.'
+    Require-Pattern $signatureClearManaged ('\.ClearManagedEmailSignature\(\s*_mail\s*,\s*' + $inlineSurfaceExpression + '\s*,\s*_composeKey\s*,[\s\S]*?_inlineExplorerIdentityKey\s*\)') 'Managed signature cleanup does not forward the tracked inline Explorer identity.'
 }
 
 $signatureClearInitial = Get-CSharpMethodBlock $SignatureSource 'ClearInitialEmailSignatureSlot'
 if ($null -eq $signatureClearInitial) {
     Add-Failure 'ClearInitialEmailSignatureSlot could not be parsed.'
 } else {
-    Require-Pattern $signatureClearInitial '\.ClearInitialEmailSignatureSlot\(\s*_mail\s*,\s*_isInlineResponse\s*,\s*_composeKey\s*,[\s\S]*?_inlineExplorerIdentityKey\s*\)' 'Initial signature-slot cleanup does not forward the tracked inline Explorer identity.'
+    Require-Pattern $signatureClearInitial ('\.ClearInitialEmailSignatureSlot\(\s*_mail\s*,\s*' + $inlineSurfaceExpression + '\s*,\s*_composeKey\s*,[\s\S]*?_inlineExplorerIdentityKey\s*\)') 'Initial signature-slot cleanup does not forward the tracked inline Explorer identity.'
 }
 
 $signatureTimerBlock = Get-CSharpMethodBlock $SignatureSource 'OnEmailSignatureTimerTick'

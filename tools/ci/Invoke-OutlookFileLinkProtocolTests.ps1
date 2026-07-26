@@ -245,6 +245,7 @@ internal static class FileLinkProtocolTests
         TestUnauthorizedPreflight();
         TestKnownRootCollision();
         TestIndeterminateRootCollision();
+        TestShareFolderDeleteRetry();
         TestOwnedDirectoryRecovery();
         TestInsufficientStorage();
         TestShareCreateSingleRequest();
@@ -359,6 +360,43 @@ internal static class FileLinkProtocolTests
                 HttpStatusCode.Unauthorized,
                 ex.StatusCode);
         }
+    }
+
+    private static void TestShareFolderDeleteRetry()
+    {
+        var requests = new List<NcHttpRequestOptions>();
+        var client = new FileLinkDavClient(options =>
+        {
+            requests.Add(options);
+            if (requests.Count == 1)
+            {
+                return new NcHttpResponse
+                {
+                    HasHttpResponse = true,
+                    StatusCode = HttpStatusCode.BadGateway,
+                    Headers = new Dictionary<string, string>
+                    {
+                        { "Retry-After", "0" }
+                    }
+                };
+            }
+            return Http(HttpStatusCode.NoContent);
+        });
+
+        client.DeleteShareFolder(
+            "https://cloud.example.test",
+            "user",
+            "NC Connector/20260726_discarded",
+            CancellationToken.None);
+
+        Equal(
+            "Share cleanup retries a temporary DAV failure",
+            2,
+            requests.Count);
+        Check(
+            "Share cleanup retry remains a DELETE",
+            requests.TrueForAll(
+                request => request.Method == "DELETE"));
     }
 
     private static void TestKnownRootCollision()

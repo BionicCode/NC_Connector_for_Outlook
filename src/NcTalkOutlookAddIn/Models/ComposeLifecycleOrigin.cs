@@ -19,13 +19,10 @@ namespace NcTalkOutlookAddIn.Models
 
         public string AppPassword { get; set; }
 
-        public string CanonicalUserId { get; set; }
-
         public string AccountFingerprint { get; set; }
 
         internal static ComposeLifecycleOrigin Create(
-            TalkServiceConfiguration configuration,
-            string canonicalUserId)
+            TalkServiceConfiguration configuration)
         {
             if (configuration == null)
             {
@@ -34,14 +31,12 @@ namespace NcTalkOutlookAddIn.Models
 
             string serverUrl = configuration.GetNormalizedBaseUrl();
             string username = (configuration.Username ?? string.Empty).Trim();
-            string userId = (canonicalUserId ?? string.Empty).Trim();
             return new ComposeLifecycleOrigin
             {
                 ServerUrl = serverUrl,
                 Username = username,
                 AppPassword = configuration.AppPassword ?? string.Empty,
-                CanonicalUserId = userId,
-                AccountFingerprint = BuildFingerprint(serverUrl, username, userId)
+                AccountFingerprint = BuildFingerprint(serverUrl, username)
             };
         }
 
@@ -66,17 +61,18 @@ namespace NcTalkOutlookAddIn.Models
                 ServerUrl = ServerUrl,
                 Username = Username,
                 AppPassword = AppPassword,
-                CanonicalUserId = CanonicalUserId,
                 AccountFingerprint = AccountFingerprint
             };
         }
 
-        private static string BuildFingerprint(string serverUrl, string username, string canonicalUserId)
+        private static string BuildFingerprint(
+            string serverUrl,
+            string username)
         {
+            // Keep the former empty user-id segment so existing account
+            // fingerprints remain stable across upgrades.
             string value = (serverUrl ?? string.Empty).Trim().ToLowerInvariant()
-                           + "\n"
-                           + (canonicalUserId ?? string.Empty).Trim()
-                           + "\n"
+                           + "\n\n"
                            + (username ?? string.Empty).Trim().ToLowerInvariant();
             using (SHA256 sha256 = SHA256.Create())
             {

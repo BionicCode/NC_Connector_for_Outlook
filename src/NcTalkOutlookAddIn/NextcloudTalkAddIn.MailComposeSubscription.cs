@@ -5,16 +5,11 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Forms;
 using NcTalkOutlookAddIn.Controllers;
 using NcTalkOutlookAddIn.Models;
-using NcTalkOutlookAddIn.Services;
 using NcTalkOutlookAddIn.Settings;
-using NcTalkOutlookAddIn.UI;
 using NcTalkOutlookAddIn.Utilities;
 using Outlook = Microsoft.Office.Interop.Outlook;
 
@@ -83,14 +78,16 @@ namespace NcTalkOutlookAddIn
             }
 
             private readonly NextcloudTalkAddIn _owner;
-            private readonly Outlook.MailItem _mail;
-            private readonly Outlook.ItemEvents_10_Event _events;
+            private Outlook.MailItem _mail;
+            private Outlook.ItemEvents_10_Event _events;
+            private Outlook.Inspector _inspector;
+            private Outlook.InspectorEvents_10_Event _inspectorEvents;
+            private string _boundInspectorIdentityKey = string.Empty;
             private readonly string _mailIdentityKey;
             private readonly string _inspectorIdentityKey;
             private readonly string _composeKey;
             private readonly System.Windows.Forms.Timer _attachmentEvalTimer = new System.Windows.Forms.Timer();
             private readonly System.Windows.Forms.Timer _beforeAddShareTimer = new System.Windows.Forms.Timer();
-            private readonly System.Windows.Forms.Timer _cleanupGraceTimer = new System.Windows.Forms.Timer();
             private readonly System.Windows.Forms.Timer _emailSignatureTimer = new System.Windows.Forms.Timer();
             private readonly List<AttachmentBatchEntry> _pendingAddedBatch = new List<AttachmentBatchEntry>();
             private readonly List<BeforeAddShareEntry> _pendingBeforeAddShareEntries = new List<BeforeAddShareEntry>();
@@ -101,9 +98,7 @@ namespace NcTalkOutlookAddIn
             private bool _attachmentSuppressed;
             private bool _attachmentPromptOpen;
             private bool _beforeAddShareFlowRunning;
-            private int _surfaceCloseVerificationAttempts;
             private bool _emailSignatureApplying;
-            private bool _isInlineResponse;
             private ComposeSurfaceState _composeSurfaceState;
             private string _activeInspectorIdentityKey = string.Empty;
             private string _inlineExplorerIdentityKey = string.Empty;
@@ -124,7 +119,6 @@ namespace NcTalkOutlookAddIn
             {
                 _owner = owner;
                 _mail = mail;
-                _isInlineResponse = isInlineResponse;
                 _mailIdentityKey = string.IsNullOrWhiteSpace(mailIdentityKey)
                     ? ComInteropScope.ResolveIdentityKey(mail, LogCategories.FileLink, "MailItem")
                     : mailIdentityKey.Trim();
@@ -146,9 +140,6 @@ namespace NcTalkOutlookAddIn
                 _beforeAddShareTimer.Interval = BeforeAddShareBatchDebounceMs;
                 _beforeAddShareTimer.Tick += OnBeforeAddShareTimerTick;
 
-                _cleanupGraceTimer.Interval = 250;
-                _cleanupGraceTimer.Tick += OnCleanupGraceTimerTick;
-
                 _emailSignatureTimer.Interval = isInlineResponse ? EmailSignatureInlineApplyDebounceMs : EmailSignatureApplyDebounceMs;
                 _emailSignatureTimer.Tick += OnEmailSignatureTimerTick;
 
@@ -159,7 +150,8 @@ namespace NcTalkOutlookAddIn
                     _events.AttachmentAdd += OnAttachmentAdd;
                     _events.PropertyChange += OnPropertyChange;
                     _events.Send += OnSend;
-                    _events.Close += OnClose;
+                    _events.AfterWrite += OnAfterWrite;
+                    _events.Unload += OnUnload;
                 }
 
                 LogFileLink(
@@ -177,6 +169,98 @@ namespace NcTalkOutlookAddIn
 
                 BeginAttachmentAutomationSettingsRefresh();
                 ScheduleEmailSignatureApplication("compose_open");
+            }
+
+            internal void BindInspectorLifecycle(
+                Outlook.Inspector inspector)
+            {
+                if (_disposed
+                    || (_inspectorEvents != null && inspector == null))
+                {
+                    return;
+                }
+
+                Outlook.Inspector resolvedInspector = inspector;
+                if (resolvedInspector == null)
+                {
+                    try
+                    {
+                        resolvedInspector = _mail != null
+                            ? _mail.GetInspector
+                            : null;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticsLogger.LogException(
+                            LogCategories.FileLink,
+                            "Failed to resolve compose Inspector for lifecycle binding (composeKey="
+                            + _composeKey
+                            + ").",
+                            ex);
+                        return;
+                    }
+                }
+
+                Outlook.InspectorEvents_10_Event inspectorEvents =
+                    resolvedInspector as Outlook.InspectorEvents_10_Event;
+                if (inspectorEvents == null)
+                {
+                    LogFileLink(
+                        "Compose Inspector lifecycle binding unavailable (composeKey="
+                        + _composeKey
+                        + ").");
+                    return;
+                }
+
+                string inspectorIdentityKey =
+                    ComInteropScope.ResolveIdentityKey(
+                        resolvedInspector,
+                        LogCategories.FileLink,
+                        "Compose Inspector");
+                if (_inspectorEvents != null
+                    && (ComInteropScope.AreSameObject(
+                            _inspector,
+                            resolvedInspector,
+                            LogCategories.FileLink,
+                            "Bound compose Inspector",
+                            "New compose Inspector")
+                        || (!string.IsNullOrWhiteSpace(
+                                _boundInspectorIdentityKey)
+                            && string.Equals(
+                                _boundInspectorIdentityKey,
+                                inspectorIdentityKey,
+                                StringComparison.Ordinal))))
+                {
+                    return;
+                }
+                if (_inspectorEvents != null)
+                {
+                    UnbindInspectorLifecycle();
+                }
+
+                try
+                {
+                    inspectorEvents.Close += OnInspectorClosed;
+                    _inspector = resolvedInspector;
+                    _inspectorEvents = inspectorEvents;
+                    _boundInspectorIdentityKey =
+                        inspectorIdentityKey;
+                    LogFileLink(
+                        "Compose Inspector.Close lifecycle bound (composeKey="
+                        + _composeKey
+                        + ", inspectorKey="
+                        + (_boundInspectorIdentityKey ?? string.Empty)
+                        + ").");
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticsLogger.LogException(
+                        LogCategories.FileLink,
+                        "Failed to bind compose Inspector.Close lifecycle (composeKey="
+                        + _composeKey
+                        + ").",
+                        ex);
+                }
             }
 
             internal void MarkInlineResponse(string explorerIdentityKey)
@@ -200,7 +284,6 @@ namespace NcTalkOutlookAddIn
 
                 ComposeSurfaceState previousSurface = _composeSurfaceState;
                 _composeSurfaceState = ComposeSurfaceState.InlineResponse;
-                _isInlineResponse = true;
                 _activeInspectorIdentityKey = string.Empty;
                 _inlineExplorerIdentityKey = normalizedExplorerIdentityKey;
                 _emailSignatureTimer.Interval = EmailSignatureInlineApplyDebounceMs;
@@ -237,7 +320,6 @@ namespace NcTalkOutlookAddIn
 
                 ComposeSurfaceState previousSurface = _composeSurfaceState;
                 _composeSurfaceState = ComposeSurfaceState.Inspector;
-                _isInlineResponse = false;
                 _activeInspectorIdentityKey = normalizedInspectorIdentityKey;
                 _inlineExplorerIdentityKey = string.Empty;
                 _emailSignatureTimer.Interval = EmailSignatureApplyDebounceMs;
@@ -280,14 +362,12 @@ namespace NcTalkOutlookAddIn
 
                 _emailSignatureTimer.Stop();
                 _composeSurfaceState = ComposeSurfaceState.Detached;
-                _isInlineResponse = false;
                 _activeInspectorIdentityKey = string.Empty;
                 _inlineExplorerIdentityKey = string.Empty;
                 LogEmailSignature(
                     "compose surface changed (from=InlineResponse, to=Detached, explorerKey="
                     + normalizedExplorerIdentityKey
                     + ").");
-                ScheduleSurfaceCloseVerification("inline_response_close");
             }
 
             private void DeferEmailSignatureApplication(string reason, string source)
@@ -551,14 +631,47 @@ namespace NcTalkOutlookAddIn
 
             public void Dispose()
             {
+                Dispose(true);
+            }
+
+            private void UnbindInspectorLifecycle()
+            {
+                Outlook.InspectorEvents_10_Event inspectorEvents =
+                    _inspectorEvents;
+                _inspectorEvents = null;
+                _inspector = null;
+                _boundInspectorIdentityKey = string.Empty;
+                if (inspectorEvents == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    inspectorEvents.Close -= OnInspectorClosed;
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticsLogger.LogException(
+                        LogCategories.FileLink,
+                        "Failed to detach compose Inspector.Close lifecycle (composeKey="
+                        + _composeKey
+                        + ").",
+                        ex);
+                }
+            }
+
+            private void Dispose(bool detachItemEvents)
+            {
                 if (_disposed)
                 {
                     return;
                 }
 
+                int pendingShareCleanup =
+                    _shareCleanupTracker.ReleaseAll();
                 _attachmentEvalTimer.Stop();
                 _beforeAddShareTimer.Stop();
-                _cleanupGraceTimer.Stop();
                 _emailSignatureTimer.Stop();
 
                 if (_pendingBeforeAddShareEntries.Count > 0)
@@ -582,18 +695,17 @@ namespace NcTalkOutlookAddIn
                 {
                     _attachmentEvalTimer.Tick -= OnAttachmentEvalTimerTick;
                     _beforeAddShareTimer.Tick -= OnBeforeAddShareTimerTick;
-                    _cleanupGraceTimer.Tick -= OnCleanupGraceTimerTick;
                     _emailSignatureTimer.Tick -= OnEmailSignatureTimerTick;
                     _attachmentEvalTimer.Dispose();
                     _beforeAddShareTimer.Dispose();
-                    _cleanupGraceTimer.Dispose();
                     _emailSignatureTimer.Dispose();
                 }
                 catch (Exception ex)
                 {
                     DiagnosticsLogger.LogException(LogCategories.FileLink, "Failed to dispose compose timers.", ex);
                 }
-                if (_events != null)
+                UnbindInspectorLifecycle();
+                if (detachItemEvents && _events != null)
                 {
                     try
                     {
@@ -601,7 +713,8 @@ namespace NcTalkOutlookAddIn
                         _events.AttachmentAdd -= OnAttachmentAdd;
                         _events.PropertyChange -= OnPropertyChange;
                         _events.Send -= OnSend;
-                        _events.Close -= OnClose;
+                        _events.AfterWrite -= OnAfterWrite;
+                        _events.Unload -= OnUnload;
                     }
                     catch (Exception ex)
                     {
@@ -610,12 +723,16 @@ namespace NcTalkOutlookAddIn
                 }
 
                 _owner.RemoveMailComposeSubscription(this);
+                _events = null;
+                _mail = null;
                 _disposed = true;
                 LogFileLink(
                     "Compose subscription disposed (composeKey="
                     + _composeKey
                     + ", hadPasswordDispatch="
                     + (_passwordDispatchQueue.Count > 0).ToString(CultureInfo.InvariantCulture)
+                    + ", releasedShareCleanup="
+                    + pendingShareCleanup.ToString(CultureInfo.InvariantCulture)
                     + ").");
             }
         }

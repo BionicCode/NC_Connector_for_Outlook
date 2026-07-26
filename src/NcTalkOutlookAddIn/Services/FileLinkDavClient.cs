@@ -196,17 +196,21 @@ namespace NcTalkOutlookAddIn.Services
                 baseUrl,
                 userId,
                 relativeFolderPath);
-            NcHttpResponse response = Send(new NcHttpRequestOptions
-            {
-                Method = "DELETE",
-                Url = url,
-                TimeoutMs = 90000,
-                ReadWriteTimeoutMs = 90000,
-                IncludeAuthHeader = true,
-                IncludeOcsApiHeader = false,
-                ParseJson = false,
-                CancellationToken = cancellationToken
-            });
+            NcHttpResponse response = SendWithRetry(
+                () => new NcHttpRequestOptions
+                {
+                    Method = "DELETE",
+                    Url = url,
+                    TimeoutMs = 90000,
+                    ReadWriteTimeoutMs = 90000,
+                    IncludeAuthHeader = true,
+                    IncludeOcsApiHeader = false,
+                    ParseJson = false,
+                    CancellationToken = cancellationToken
+                },
+                "share_folder_delete",
+                cancellationToken,
+                null);
 
             cancellationToken.ThrowIfCancellationRequested();
             if (!response.HasHttpResponse)

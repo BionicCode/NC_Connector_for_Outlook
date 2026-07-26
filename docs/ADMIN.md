@@ -551,9 +551,11 @@ Outlook or Exchange can reject a large attachment before an add-in event runs. I
 
 ### Unsent mail and share cleanup
 
-Once a share block has been inserted successfully, the server share remains. Outlook does not provide a reliable signal that distinguishes an intentionally discarded compose window from delayed send, offline Outbox delivery, a custom Drafts/Outbox folder, or an inline reply moved into its own window. NC Connector therefore does not delete a successfully inserted share from a close or folder-absence assumption.
+After a share block is inserted, NC Connector tracks the newly created server share until Outlook successfully saves the message after that insertion. If the compose window is discarded before a successful save, NC Connector removes the exact server folder with the account context captured when the share was created.
 
-- If the user discards that message, remove the unused share manually in Nextcloud.
+- Saving or automatically saving a draft keeps the share. Sending the message, delayed delivery, and offline Outbox delivery also keep it.
+- Cancelling the close action or moving an inline reply into its own window does not remove the share.
+- Deleting a draft that Outlook has already saved is not tracked. Remove its unused share manually in Nextcloud.
 - If the share block cannot be inserted, the wizard reports failure and immediately attempts to remove the newly created server folder with the captured account context.
 - An enforcing attachment policy blocks sending while a normal attachment that should have been routed through NC Connector remains in the message.
 - Separate password delivery is handled independently through saved Outlook drafts as described below.

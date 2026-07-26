@@ -118,10 +118,12 @@ Root:
   Compose-Attachment-Interception/Evaluation/Share-Launch-Flow.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Signature.cs`
   Backend-E-Mail-Signatur-Policy fuer das passende Outlook-Absenderkonto.
-- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs`
-  Send-Gate, Behandlung geschlossener Compose-Oberflächen und dauerhaftes Vorbereiten separater Passwortmails.
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Send.cs`
+  Send-Gate und dauerhaftes Vorbereiten separater Passwortmails.
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.ShareCleanup.cs`
+  `AfterWrite`-, `Inspector.Close`- und Inline-`Unload`-Behandlung für neu eingefügte Freigaben.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.ComposeLifecycle.cs`
-  Composition-Root-Brücke für die Bereinigung bei eindeutig fehlgeschlagener Einfügung und bestätigten Passwortversand.
+  Composition-Root-Brücke für asynchron angestoßene Freigabebereinigung und bestätigten Passwortversand.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.AppointmentSubscription.cs`
   Runtime-Subscription fuer Termin-Write/Close/Delete und Lifecycle-Cleanup.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkAppointmentSync.cs`
@@ -140,7 +142,8 @@ Root:
 Controller:
 
 - `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` mit `Lifecycle`- und `Sync`-Partials (Terminmetadaten, lokaler Snapshot und entfernte Raumaktualisierung)
-- `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` (eindeutige Bereinigung, wenn eine neue Freigabe nicht eingefügt werden kann, sowie Body-, Empfänger-, Absender-, Secrets- und Signaturaufbereitung der Passwortmail)
+- `src/NcTalkOutlookAddIn/Controllers/ComposeShareCleanupTracker.cs` (In-Memory-Status neu eingefügter, noch nicht geschriebener Compose-Freigaben)
+- `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` (Löschung nicht persistierter oder nicht eingefügter Serverartefakte über den exakten Ursprung sowie Body-, Empfänger-, Absender-, Secrets- und Signaturaufbereitung der Passwortmail)
 - `src/NcTalkOutlookAddIn/Controllers/PendingPasswordDraftController.cs` (gespeicherte Outlook-Passwortentwürfe, Subscription auf den exakten Gesendet-Ordner, Neustart-Wiederherstellung und automatischer/manueller Follow-up-Versand)
 - `src/NcTalkOutlookAddIn/Controllers/TalkDescriptionTemplateController.cs` (Talk-Template-/Block-Rendering)
 - `src/NcTalkOutlookAddIn/Controllers/OutlookRecipientResolverController.cs` (SMTP- und Attendee-Aufloesung)
@@ -264,7 +267,13 @@ Backend-Talk-Templates verwenden für die Outlook-Word-/RTF-Pipeline bevorzugt T
 - Normale HTML-Compose-Fenster verwenden zuerst den Inspector-WordEditor, damit verwaltete Bookmarks erhalten bleiben. Nur wenn dieser Editor nicht geoeffnet werden kann, bleibt die direkte `MailItem.HTMLBody`-Route als Kompatibilitaetsfallback aktiv.
 - `MailComposeSubscription` debounct Anhangsänderungen und verarbeitet Always-via-NC sowie den Schwellwertmodus. `BeforeAttachmentAdd` versucht die Dateidaten früh zu erfassen; bei einer erzwingenden Policy wird ein nicht materialisierbarer oder nicht prüfbarer Host-Anhang abgebrochen. Harte Outlook-/Exchange-Grenzen können weiterhin vor einem Add-in-Ereignis greifen.
 - `NextcloudTalkAddIn.TryInsertHtmlIntoMail(...)` und `TryInsertPlainTextIntoMail(...)` geben den Einfügestatus von `MailInteropController` zurück. Scheitern alle Einfügepfade, stellt `FileLinkLaunchController` die neu erzeugten Serverartefakte zur Bereinigung ein und meldet den Wizard als fehlgeschlagen.
-- `ComposeLifecycleOrigin` hält den exakten Server-/Kontokontext für eine eindeutige Bereinigung oder spätere Secrets-Anfrage. Kann eine neu erstellte Freigabe nicht in die Mail eingefügt werden, löscht der Controller ihren Serverordner mit diesem Kontext. Nach erfolgreicher Einfügung wird eine Freigabe nicht aufgrund eines mehrdeutigen Close- oder Folder-Absence-Signals gelöscht; Outlook unterscheidet damit weder Verwerfen, „Später senden“, eigene Entwurfs-/Postausgangsordner noch Inline-Pop-out zuverlässig.
+- `ComposeLifecycleOrigin` hält den exakten Server-/Kontokontext für das Löschen der erstellten Freigabe oder eine spätere Secrets-Anfrage. Die Bereinigung fällt nie auf das aktuell ausgewählte Konto zurück.
+- Kann eine neu erstellte Freigabe nicht in die Mail eingefügt werden, versucht der Controller, ihren Serverordner mit diesem erfassten Kontext zu löschen.
+- Nach erfolgreicher Einfügung verfolgt `MailComposeSubscription` den `ComposeShareCleanupRecord`, bis Outlook `AfterWrite` auslöst. Ein abgeschlossener Schreibvorgang umfasst Speichern, automatisches Speichern und den Schreibvorgang für Versand/Postausgang; diese Pfade geben den Bereinigungseintrag frei, ohne die Freigabe zu löschen.
+- Klassische Compose-Fenster binden das konkrete `InspectorEvents_10.Close`-Ereignis. Es wird erst ausgelöst, wenn dieser Inspector tatsächlich schließt. Folgte auf die Einfügung kein erfolgreicher Schreibvorgang, stößt die Subscription die Löschung mit dem erfassten Konto und relativen Pfad an. Ein abgebrochener Schließvorgang lässt den Bereinigungsstatus daher aktiv.
+- Inline-Compose behandelt `Explorer.InlineResponseClose` nur als Oberflächenwechsel, weil Outlook das Ereignis auch bei Pop-out und Navigation auslöst. `ItemEvents_10.Unload` bleibt dort das abschließende Item-Signal und wertet ausschließlich den vorher erfassten Bereinigungsstatus aus, ohne auf das entladene `MailItem` zuzugreifen.
+- DAV-Bereinigungen nutzen den gemeinsamen begrenzten FileLink-Retry-Pfad. Ein wiederholtes Löschen bleibt idempotent, weil ein bereits fehlender Ordner akzeptiert wird.
+- Die Bereinigungsverfolgung liegt im Arbeitsspeicher. Hat Outlook die Nachricht geschrieben, löscht das spätere Löschen dieses gespeicherten Entwurfs – auch nach einem Outlook-Neustart – die Freigabe nicht; die ungenutzte Freigabe muss manuell entfernt werden.
 - Vor Annahme einer Hauptmail mit separater Passwortzustellung erstellt und speichert `PendingPasswordDraftController` die vollständigen Follow-up-Entwürfe, schützt deren Payload per Windows-DPAPI, merkt sich den exakten `SaveSentMessageFolder`, markiert die Hauptmail mit einer eindeutigen Attempt-ID und aktiviert anschließend die Entwürfe. Schlägt die Speicherung fehl, wird der Versand der Hauptmail abgebrochen.
 - Nur ein `ItemAdd`-Ereignis oder eine Neustartprüfung, die die markierte Hauptmail mit `MailItem.Sent=true` im exakt gespeicherten Ordner findet, bestätigt den Versand. „Später senden“ und Offline-Postausgang bleiben dadurch ausstehend.
 - Das Send-Gate bricht den Versand bei einer erzwingenden Anhangs-Policy ab, solange noch ein gewöhnlicher regelwidriger Anhang vorhanden ist.
@@ -453,9 +462,10 @@ Vorgeschlagener Ablauf:
 3. Kalender: Outlook neu starten, denselben Termin öffnen, die Startzeit ändern und erneut speichern.
 4. Kalender: Teilnehmer hinzufügen und erneut speichern.
 5. Mail: Freigabe-Wizard ausführen, ein oder zwei kleine Dateien hochladen, den Freigabeblock einfügen und an das eigene Konto senden.
-6. Mail: Einen Entwurf und eine Mail mit „Später senden“ prüfen; Passwort-Follow-up und Freigabe bleiben bis zur Bestätigung in „Gesendete Elemente“ ausstehend.
-7. IFB: IFB aktivieren, URL-Reservierung und TCP-Listener prüfen und danach im Outlook-Terminplanungs-Assistenten eine Adresse aus dem Nextcloud-Systemadressbuch verwenden. Eine direkte Anfrage ohne Profil-Secret muss `404` liefern.
-8. **Einstellungen -> Erweitert -> Jetzt prüfen** ausführen und kontrollieren, dass aktuelle Version, letzte Prüfung, Download-Link und Änderungsübersicht ohne blockierte Outlook-Oberfläche aktualisiert werden.
+6. Mail: Eine Freigabe einfügen und die Nachricht vor dem Speichern verwerfen; prüfen, dass der exakte Serverordner entfernt wird. Mit Speichern oder AutoSave wiederholen und prüfen, dass die Freigabe bestehen bleibt.
+7. Mail: Einen gespeicherten Entwurf und eine Mail mit „Später senden“ prüfen; die Freigabe bleibt bestehen, während das Passwort-Follow-up bis zur Bestätigung in „Gesendete Elemente“ ausstehend bleibt.
+8. IFB: IFB aktivieren, URL-Reservierung und TCP-Listener prüfen und danach im Outlook-Terminplanungs-Assistenten eine Adresse aus dem Nextcloud-Systemadressbuch verwenden. Eine direkte Anfrage ohne Profil-Secret muss `404` liefern.
+9. **Einstellungen -> Erweitert -> Jetzt prüfen** ausführen und kontrollieren, dass aktuelle Version, letzte Prüfung, Download-Link und Änderungsübersicht ohne blockierte Outlook-Oberfläche aktualisiert werden.
 
 ## Referenz der X-NCTALK-*-Eigenschaften
 

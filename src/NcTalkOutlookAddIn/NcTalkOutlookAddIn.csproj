@@ -95,7 +95,8 @@
     <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.cs" />
     <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.AttachmentFlow.cs" />
     <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.Signature.cs" />
-    <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs" />
+    <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.Send.cs" />
+    <Compile Include="NextcloudTalkAddIn.MailComposeSubscription.ShareCleanup.cs" />
     <Compile Include="NextcloudTalkAddIn.AppointmentSubscription.cs" />
     <Compile Include="NextcloudTalkAddIn.SubscriptionEnsure.cs" />
     <Compile Include="NextcloudTalkAddIn.ComposeLifecycle.cs" />
@@ -145,6 +146,7 @@
     <Compile Include="Controllers\OutlookRecipientResolverController.cs" />
     <Compile Include="Controllers\MailComposeSubscriptionRegistryController.cs" />
     <Compile Include="Controllers\ComposeShareLifecycleController.cs" />
+    <Compile Include="Controllers\ComposeShareCleanupTracker.cs" />
     <Compile Include="Controllers\PendingPasswordDraftController.cs" />
     <Compile Include="Controllers\MailInteropController.cs" />
     <Compile Include="Controllers\OutlookWordEditorContext.cs" />

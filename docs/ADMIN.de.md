@@ -551,9 +551,11 @@ Outlook oder Exchange kann einen großen Anhang ablehnen, bevor ein Add-in-Ereig
 
 ### Ungesendete Mail und Freigabebereinigung
 
-Nach erfolgreicher Einfügung des Freigabeblocks bleibt die Serverfreigabe bestehen. Outlook liefert kein zuverlässiges Signal, das ein bewusst verworfenes Verfassen-Fenster von „Später senden“, Offline-Postausgang, eigenen Entwurfs-/Postausgangsordnern oder einer in ein eigenes Fenster verschobenen Inline-Antwort unterscheidet. NC Connector löscht eine erfolgreich eingefügte Freigabe deshalb nicht aufgrund einer Close- oder Folder-Absence-Annahme.
+Nach dem Einfügen eines Freigabeblocks verfolgt NC Connector die neu erstellte Serverfreigabe, bis Outlook die Nachricht nach dieser Einfügung erfolgreich speichert. Wird das Verfassen-Fenster vor einer erfolgreichen Speicherung verworfen, entfernt NC Connector den exakten Serverordner mit dem beim Erstellen erfassten Kontokontext.
 
-- Verwirft der Benutzer die Mail, muss die ungenutzte Freigabe manuell in Nextcloud entfernt werden.
+- Manuelles oder automatisches Speichern eines Entwurfs behält die Freigabe. Versand, „Später senden“ und Offline-Postausgang behalten sie ebenfalls.
+- Ein abgebrochener Schließvorgang oder das Verschieben einer Inline-Antwort in ein eigenes Fenster entfernt die Freigabe nicht.
+- Das spätere Löschen eines bereits von Outlook gespeicherten Entwurfs wird nicht verfolgt. Seine ungenutzte Freigabe muss manuell in Nextcloud entfernt werden.
 - Kann der Freigabeblock nicht eingefügt werden, meldet der Wizard einen Fehler und versucht sofort, den neu erzeugten Serverordner mit dem erfassten Kontokontext zu entfernen.
 - Eine erzwingende Anhangs-Policy blockiert den Versand, solange ein normaler Anhang in der Nachricht verbleibt, der über NC Connector hätte laufen müssen.
 - Die separate Passwortzustellung wird unabhängig davon über gespeicherte Outlook-Entwürfe behandelt.

@@ -178,9 +178,7 @@ namespace NcTalkOutlookAddIn.Controllers
                     bool plainTextCompose = MailInteropController.IsPlainTextMail(mail);
                     NextcloudTalkAddIn.LogFileLinkMessage("Share created (folder=\"" + wizard.Result.FolderName + "\").");
                     ComposeLifecycleOrigin origin =
-                        ComposeLifecycleOrigin.Create(
-                            configuration,
-                            string.Empty);
+                        ComposeLifecycleOrigin.Create(configuration);
                     string composeKey = ComInteropScope.ResolveIdentityKey(
                         mail,
                         LogCategories.FileLink,
@@ -282,6 +280,9 @@ namespace NcTalkOutlookAddIn.Controllers
                             "body_insert_failed");
                         return false;
                     }
+                    composeSubscription.ArmShareCleanup(
+                        wizard.Result,
+                        origin);
                     if (registerSeparatePassword)
                     {
                         composeSubscription.RegisterSeparatePasswordDispatch(

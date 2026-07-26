@@ -3,6 +3,7 @@
 // See LICENSE.txt for details.
 
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using NcTalkOutlookAddIn.Controllers;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Settings;
@@ -15,10 +16,9 @@ namespace NcTalkOutlookAddIn
         private PendingPasswordDraftController
             _pendingPasswordDraftController;
 
-        private void InitializeComposeLifecycle(string outlookProfileName)
+        private void InitializeComposeLifecycle()
         {
             DisposeComposeLifecycle();
-            _composeShareLifecycleController.AttachOwner(this);
             _pendingPasswordDraftController =
                 new PendingPasswordDraftController(
                     this,
@@ -58,21 +58,83 @@ namespace NcTalkOutlookAddIn
             ComposeLifecycleOrigin origin,
             string reason)
         {
-            _composeShareLifecycleController.TryDeleteComposeShareFolder(
-                new ComposeShareCleanupRecord
+            QueueCreatedShareCleanup(
+                composeKey,
+                new List<ComposeShareCleanupRecord>
                 {
-                    RelativeFolder = result != null
-                        ? result.RelativePath
-                        : string.Empty,
-                    ShareId = result != null
-                        ? result.ShareId
-                        : string.Empty,
-                    ShareLabel = result != null
-                        ? result.FolderName
-                        : string.Empty,
-                    Origin = origin != null ? origin.Clone() : null
+                    new ComposeShareCleanupRecord
+                    {
+                        RelativeFolder = result != null
+                            ? result.RelativePath
+                            : string.Empty,
+                        ShareId = result != null
+                            ? result.ShareId
+                            : string.Empty,
+                        ShareLabel = result != null
+                            ? result.FolderName
+                            : string.Empty,
+                        Origin = origin
+                    }
                 },
                 reason);
+        }
+
+        internal void QueueCreatedShareCleanup(
+            string composeKey,
+            List<ComposeShareCleanupRecord> records,
+            string reason)
+        {
+            var pending = new List<ComposeShareCleanupRecord>();
+            if (records != null)
+            {
+                for (int i = 0; i < records.Count; i++)
+                {
+                    ComposeShareCleanupRecord record = records[i];
+                    if (record == null
+                        || string.IsNullOrWhiteSpace(
+                            record.RelativeFolder))
+                    {
+                        continue;
+                    }
+                    pending.Add(
+                        new ComposeShareCleanupRecord
+                        {
+                            RelativeFolder =
+                                record.RelativeFolder.Trim(),
+                            ShareId = record.ShareId
+                                ?? string.Empty,
+                            ShareLabel = record.ShareLabel
+                                ?? string.Empty,
+                            Origin = record.Origin != null
+                                ? record.Origin.Clone()
+                                : null
+                        });
+                }
+            }
+            if (pending.Count == 0)
+            {
+                return;
+            }
+
+            LogFileLinkMessage(
+                "Compose share cleanup queued (composeKey="
+                + (composeKey ?? string.Empty)
+                + ", count="
+                + pending.Count
+                + ", reason="
+                + (reason ?? string.Empty)
+                + ").");
+            Task.Run(
+                () =>
+                {
+                    for (int i = 0; i < pending.Count; i++)
+                    {
+                        _composeShareLifecycleController
+                            .TryDeleteComposeShareFolder(
+                                pending[i],
+                                reason);
+                    }
+                });
         }
 
         internal void CaptureSeparatePasswordSignatureSnapshot(
@@ -105,10 +167,5 @@ namespace NcTalkOutlookAddIn
                 plainText);
         }
 
-        internal bool IsMailComposeSurfaceOpen(Outlook.MailItem mail)
-        {
-            return _mailInteropController.IsActiveInlineResponse(mail)
-                   || _mailInteropController.IsMailOpenInAnyInspector(mail);
-        }
     }
 }

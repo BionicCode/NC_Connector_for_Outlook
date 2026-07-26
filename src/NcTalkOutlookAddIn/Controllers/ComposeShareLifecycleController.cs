@@ -20,7 +20,7 @@ namespace NcTalkOutlookAddIn.Controllers
         internal const string SecretDeliveryPlaceholder =
             "__NCC_SECRET_DELIVERY_VALUE__";
 
-        private NextcloudTalkAddIn _owner;
+        private readonly NextcloudTalkAddIn _owner;
 
         private sealed class SeparatePasswordSignatureSnapshot
         {
@@ -35,16 +35,7 @@ namespace NcTalkOutlookAddIn.Controllers
             internal string PlainText { get; set; }
         }
 
-        internal ComposeShareLifecycleController()
-        {
-        }
-
         internal ComposeShareLifecycleController(NextcloudTalkAddIn owner)
-        {
-            AttachOwner(owner);
-        }
-
-        internal void AttachOwner(NextcloudTalkAddIn owner)
         {
             _owner = owner;
         }
@@ -57,58 +48,22 @@ namespace NcTalkOutlookAddIn.Controllers
             {
                 return true;
             }
-            TalkServiceConfiguration configuration =
-                entry.Origin != null && entry.Origin.IsComplete()
-                    ? entry.Origin.ToConfiguration()
-                    : null;
-            return TryDeleteComposeShareFolder(
-                entry.RelativeFolder,
-                reason,
-                entry.ShareId,
-                entry.ShareLabel,
-                configuration);
-        }
-
-        internal bool TryDeleteComposeShareFolder(string relativeFolder, string reason, string shareId, string shareLabel)
-        {
-            return TryDeleteComposeShareFolder(
-                relativeFolder,
-                reason,
-                shareId,
-                shareLabel,
-                null);
-        }
-
-        private bool TryDeleteComposeShareFolder(
-            string relativeFolder,
-            string reason,
-            string shareId,
-            string shareLabel,
-            TalkServiceConfiguration configuration)
-        {
+            string relativeFolder = entry.RelativeFolder;
             if (string.IsNullOrWhiteSpace(relativeFolder))
             {
                 return true;
             }
-
-            if (configuration == null)
+            if (entry.Origin == null || !entry.Origin.IsComplete())
             {
-                _owner.EnsureSettingsLoaded();
-                if (_owner.CurrentSettings == null
-                    || !_owner.SettingsAreComplete())
-                {
-                    NextcloudTalkAddIn.LogFileLinkMessage(
-                        "Compose share cleanup skipped (settings incomplete): relativeFolder="
-                        + relativeFolder
-                        + ", reason="
-                        + (reason ?? string.Empty));
-                    return false;
-                }
-                configuration = new TalkServiceConfiguration(
-                    _owner.CurrentSettings.ServerUrl,
-                    _owner.CurrentSettings.Username,
-                    _owner.CurrentSettings.AppPassword);
+                NextcloudTalkAddIn.LogFileLinkMessage(
+                    "Compose share cleanup skipped (origin incomplete): relativeFolder="
+                    + relativeFolder
+                    + ", reason="
+                    + (reason ?? string.Empty));
+                return false;
             }
+            TalkServiceConfiguration configuration =
+                entry.Origin.ToConfiguration();
             var service = new FileLinkService(configuration);
             try
             {
@@ -119,9 +74,9 @@ namespace NcTalkOutlookAddIn.Controllers
                     + ", reason="
                     + (reason ?? string.Empty)
                     + ", shareId="
-                    + (shareId ?? string.Empty)
+                    + (entry.ShareId ?? string.Empty)
                     + ", shareLabel="
-                    + (shareLabel ?? string.Empty)
+                    + (entry.ShareLabel ?? string.Empty)
                     + ").");
                 return true;
             }
@@ -134,9 +89,9 @@ namespace NcTalkOutlookAddIn.Controllers
                     + ", reason="
                     + (reason ?? string.Empty)
                     + ", shareId="
-                    + (shareId ?? string.Empty)
+                    + (entry.ShareId ?? string.Empty)
                     + ", shareLabel="
-                    + (shareLabel ?? string.Empty)
+                    + (entry.ShareLabel ?? string.Empty)
                     + ").",
                     ex);
                 return false;
@@ -558,7 +513,6 @@ namespace NcTalkOutlookAddIn.Controllers
                     source.SecretsPlainTextTemplate,
                 IsPlainText = source.IsPlainText,
                 DeliveryMode = source.DeliveryMode,
-                DeliveryPrepared = source.DeliveryPrepared,
                 SecretsExpireDays = source.SecretsExpireDays,
                 LanguageOverride = source.LanguageOverride,
                 BackendPolicyStatus = source.BackendPolicyStatus,

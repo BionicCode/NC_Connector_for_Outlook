@@ -38,13 +38,21 @@ function Assert-NotContains(
 
 $pendingPath = "src\NcTalkOutlookAddIn\Controllers\PendingPasswordDraftController.cs"
 $composePath = "src\NcTalkOutlookAddIn\Controllers\ComposeShareLifecycleController.cs"
-$sendPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs"
+$trackerPath = "src\NcTalkOutlookAddIn\Controllers\ComposeShareCleanupTracker.cs"
+$sendPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.MailComposeSubscription.Send.cs"
+$shareCleanupPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.MailComposeSubscription.ShareCleanup.cs"
+$subscriptionPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.MailComposeSubscription.cs"
+$hooksPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.Hooks.cs"
 $fileLinkPath = "src\NcTalkOutlookAddIn\Controllers\FileLinkLaunchController.cs"
 $projectPath = "src\NcTalkOutlookAddIn\NcTalkOutlookAddIn.csproj"
 
 $pending = Read-Source $pendingPath
 $compose = Read-Source $composePath
+$tracker = Read-Source $trackerPath
 $send = Read-Source $sendPath
+$shareCleanup = Read-Source $shareCleanupPath
+$subscription = Read-Source $subscriptionPath
+$hooks = Read-Source $hooksPath
 $fileLink = Read-Source $fileLinkPath
 $project = Read-Source $projectPath
 
@@ -128,18 +136,141 @@ Assert-Contains `
     ($compose.Replace("`r`n", "`n")) `
     "catch`n            {`n                return true;"
 
-Assert-NotContains `
-    "Close handling does not infer deletion from folder absence" `
-    $send `
-    "IsComposeStoredIn"
-Assert-NotContains `
-    "Close handling does not mark an unknown item discarded" `
-    $send `
-    "MarkComposeDiscarded"
+$insertedIndex = $fileLink.IndexOf(
+    "bool inserted =",
+    [StringComparison]::Ordinal)
+$insertFailureIndex = $fileLink.IndexOf(
+    "if (!inserted)",
+    $insertedIndex,
+    [StringComparison]::Ordinal)
+$armIndex = $fileLink.IndexOf(
+    "composeSubscription.ArmShareCleanup(",
+    $insertFailureIndex,
+    [StringComparison]::Ordinal)
+$passwordRegistrationIndex = $fileLink.IndexOf(
+    "if (registerSeparatePassword)",
+    $armIndex,
+    [StringComparison]::Ordinal)
+Assert-True `
+    "Successful FileLink insertion arms compose cleanup before follow-up handling" `
+    ($insertedIndex -ge 0 `
+        -and $insertFailureIndex -gt $insertedIndex `
+        -and $armIndex -gt $insertFailureIndex `
+        -and $passwordRegistrationIndex -gt $armIndex)
+
 Assert-Contains `
-    "Unknown close state is explicitly retained" `
-    $send `
-    "unknown state retained without destructive cleanup"
+    "Compose cleanup arms the focused tracker" `
+    $shareCleanup `
+    "_shareCleanupTracker.Arm(record)"
+Assert-Contains `
+    "Compose cleanup tracker exposes ReleaseAll" `
+    $tracker `
+    "internal int ReleaseAll()"
+Assert-Contains `
+    "Compose cleanup tracker exposes Drain" `
+    $tracker `
+    "internal List<ComposeShareCleanupRecord> Drain()"
+
+$afterWriteIndex = $shareCleanup.IndexOf(
+    "private void OnAfterWrite()",
+    [StringComparison]::Ordinal)
+$releaseIndex = $shareCleanup.IndexOf(
+    "_shareCleanupTracker.ReleaseAll();",
+    $afterWriteIndex,
+    [StringComparison]::Ordinal)
+$unloadIndex = $shareCleanup.IndexOf(
+    "private void OnUnload()",
+    [StringComparison]::Ordinal)
+$inspectorCloseIndex = $shareCleanup.IndexOf(
+    "private void OnInspectorClosed()",
+    [StringComparison]::Ordinal)
+$completionIndex = $shareCleanup.IndexOf(
+    "private void CompleteComposeShareCleanup(",
+    [StringComparison]::Ordinal)
+$drainIndex = $shareCleanup.IndexOf(
+    "_shareCleanupTracker.Drain();",
+    $completionIndex,
+    [StringComparison]::Ordinal)
+$disposeIndex = $shareCleanup.IndexOf(
+    "Dispose(detachItemEvents);",
+    $drainIndex,
+    [StringComparison]::Ordinal)
+$cleanupQueueIndex = $shareCleanup.IndexOf(
+    "_owner.QueueCreatedShareCleanup(",
+    $disposeIndex,
+    [StringComparison]::Ordinal)
+Assert-True `
+    "AfterWrite releases shares that Outlook persisted" `
+    ($afterWriteIndex -ge 0 `
+        -and $releaseIndex -gt $afterWriteIndex `
+        -and $releaseIndex -lt $unloadIndex)
+Assert-True `
+    "Inspector close and inline unload share one captured-state finalizer" `
+    ($unloadIndex -ge 0 `
+        -and $inspectorCloseIndex -gt $unloadIndex `
+        -and $completionIndex -gt $inspectorCloseIndex `
+        -and $drainIndex -gt $completionIndex `
+        -and $disposeIndex -gt $drainIndex `
+        -and $cleanupQueueIndex -gt $disposeIndex)
+Assert-NotContains `
+    "Share cleanup terminal handlers do not inspect the MailItem" `
+    $shareCleanup `
+    "_mail"
+
+Assert-Contains `
+    "Compose subscription hooks AfterWrite" `
+    $subscription `
+    "_events.AfterWrite += OnAfterWrite;"
+Assert-Contains `
+    "Compose subscription hooks Unload" `
+    $subscription `
+    "_events.Unload += OnUnload;"
+Assert-Contains `
+    "Compose subscription unhooks AfterWrite" `
+    $subscription `
+    "_events.AfterWrite -= OnAfterWrite;"
+Assert-Contains `
+    "Compose subscription unhooks Unload" `
+    $subscription `
+    "_events.Unload -= OnUnload;"
+Assert-Contains `
+    "Compose subscription hooks the concrete Inspector close event" `
+    $subscription `
+    "inspectorEvents.Close += OnInspectorClosed;"
+Assert-Contains `
+    "Compose subscription unhooks the concrete Inspector close event" `
+    $subscription `
+    "inspectorEvents.Close -= OnInspectorClosed;"
+Assert-Contains `
+    "A concrete replacement Inspector rebinds the lifecycle sink" `
+    $subscription `
+    "ComInteropScope.AreSameObject("
+Assert-Contains `
+    "Fallback binding does not replace an existing Inspector sink" `
+    $subscription `
+    "(_inspectorEvents != null && inspector == null)"
+Assert-Contains `
+    "NewInspector passes the concrete Inspector to the compose subscription" `
+    ($hooks.Replace("`r`n", "`n")) `
+    "null,`n                        inspector);"
+
+$composeCleanupSources = $subscription + "`n" + $send + "`n" + $shareCleanup
+foreach ($obsoleteClosePath in @(
+    "_events.Close += OnClose;",
+    "ScheduleSurfaceCloseVerification",
+    "OnCleanupGraceTimerTick",
+    "IsMailComposeSurfaceOpen",
+    "_cleanupGraceTimer"
+)) {
+    Assert-NotContains `
+        ("Compose cleanup does not use close polling: " + $obsoleteClosePath) `
+        $composeCleanupSources `
+        $obsoleteClosePath
+}
+Assert-NotContains `
+    "Compose cleanup does not poll Inspector state" `
+    $shareCleanup `
+    "IsMailComposeSurfaceOpen"
 
 Assert-NotContains `
     "FileLink launch no longer blocks on current-user lookup" `
@@ -149,6 +280,33 @@ Assert-Contains `
     "Lifecycle origin remains attached to compose share state" `
     $fileLink `
     "ComposeLifecycleOrigin.Create("
+
+$deleteMethodStart = $compose.IndexOf(
+    "internal bool TryDeleteComposeShareFolder(",
+    [StringComparison]::Ordinal)
+$deleteMethodEnd = $compose.IndexOf(
+    "internal void CaptureSeparatePasswordSignatureSnapshot(",
+    $deleteMethodStart,
+    [StringComparison]::Ordinal)
+Assert-True `
+    "Compose cleanup method is present" `
+    ($deleteMethodStart -ge 0 `
+        -and $deleteMethodEnd -gt $deleteMethodStart)
+$deleteMethod = $compose.Substring(
+    $deleteMethodStart,
+    $deleteMethodEnd - $deleteMethodStart)
+Assert-Contains `
+    "Compose cleanup requires its captured origin" `
+    $deleteMethod `
+    "entry.Origin == null || !entry.Origin.IsComplete()"
+Assert-Contains `
+    "Compose cleanup uses its captured origin" `
+    $deleteMethod `
+    "entry.Origin.ToConfiguration()"
+Assert-NotContains `
+    "Compose cleanup never falls back to current settings" `
+    $deleteMethod `
+    "_owner.CurrentSettings"
 
 $removed = @(
     "Models\ComposeLifecycleRecord.cs",
@@ -185,5 +343,13 @@ Assert-Contains `
     "Project includes the compact cleanup record" `
     $project `
     'Models\ComposeShareCleanupRecord.cs'
+Assert-Contains `
+    "Project includes the compose cleanup tracker" `
+    $project `
+    'Controllers\ComposeShareCleanupTracker.cs'
+Assert-Contains `
+    "Project includes the compose cleanup subscription partial" `
+    $project `
+    'NextcloudTalkAddIn.MailComposeSubscription.ShareCleanup.cs'
 
 Write-Host "All Outlook compose lifecycle regression checks passed."

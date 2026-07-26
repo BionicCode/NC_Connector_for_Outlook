@@ -436,7 +436,8 @@ namespace NcTalkOutlookAddIn
                 MailInteropController.EmailSignatureReconcileResult reconcile =
                     _owner._mailInteropController.ApplyManagedEmailSignature(
                         _mail,
-                        _isInlineResponse,
+                        _composeSurfaceState
+                            == ComposeSurfaceState.InlineResponse,
                         isPlainText,
                         signatureContent,
                         IsReplyOrForwardComposeKind(composeKind),
@@ -456,7 +457,8 @@ namespace NcTalkOutlookAddIn
                 MailInteropController.EmailSignatureReconcileResult reconcile =
                     _owner._mailInteropController.ClearManagedEmailSignature(
                         _mail,
-                        _isInlineResponse,
+                        _composeSurfaceState
+                            == ComposeSurfaceState.InlineResponse,
                         _composeKey,
                         "clear_managed:" + (reason ?? "n/a"),
                         _inlineExplorerIdentityKey);
@@ -473,7 +475,8 @@ namespace NcTalkOutlookAddIn
                 MailInteropController.EmailSignatureReconcileResult reconcile =
                     _owner._mailInteropController.ClearInitialEmailSignatureSlot(
                         _mail,
-                        _isInlineResponse,
+                        _composeSurfaceState
+                            == ComposeSurfaceState.InlineResponse,
                         _composeKey,
                         "clear_initial:" + (reason ?? "n/a"),
                         _inlineExplorerIdentityKey);
@@ -639,7 +642,8 @@ namespace NcTalkOutlookAddIn
                     return kind;
                 }
 
-                if (_isInlineResponse)
+                if (_composeSurfaceState
+                    == ComposeSurfaceState.InlineResponse)
                 {
                     return EmailSignatureComposeKind.Response;
                 }

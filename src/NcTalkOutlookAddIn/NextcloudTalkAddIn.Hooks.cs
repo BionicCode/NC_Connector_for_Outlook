@@ -264,11 +264,16 @@ namespace NcTalkOutlookAddIn
                 if (mail != null && IsMailComposeCandidate(mail, "new_inspector"))
                 {
                     string inspectorIdentityKey = ComInteropScope.ResolveIdentityKey(inspector, LogCategories.FileLink, "Inspector");
-                    MailComposeSubscription subscription = EnsureMailComposeSubscription(mail, inspectorIdentityKey);
+                    MailComposeSubscription subscription = EnsureMailComposeSubscription(
+                        mail,
+                        inspectorIdentityKey,
+                        false,
+                        null,
+                        inspector);
                     if (subscription != null && DiagnosticsLogger.IsEnabled)
                     {
                         LogFileLink(
-                            "Compose subscription bound to Inspector surface (inspectorKey="
+                            "Compose subscription associated with Inspector surface (inspectorKey="
                             + (inspectorIdentityKey ?? string.Empty)
                             + ").");
                     }

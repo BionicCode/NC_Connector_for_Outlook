@@ -78,7 +78,8 @@ namespace NcTalkOutlookAddIn
         public NextcloudTalkAddIn()
         {
             _talkAppointmentController = new TalkAppointmentController(this);
-            _composeShareLifecycleController = new ComposeShareLifecycleController();
+            _composeShareLifecycleController =
+                new ComposeShareLifecycleController(this);
             _fileLinkLaunchController = new FileLinkLaunchController(this);
             _talkRibbonController = new TalkRibbonController(this);
             _mailInteropController = new MailInteropController(this);
@@ -335,7 +336,8 @@ namespace NcTalkOutlookAddIn
             Outlook.MailItem mail,
             string inspectorIdentityOverride = null,
             bool isInlineResponse = false,
-            string inlineExplorerIdentityOverride = null)
+            string inlineExplorerIdentityOverride = null,
+            Outlook.Inspector inspector = null)
         {
             if (mail == null)
             {
@@ -377,6 +379,7 @@ namespace NcTalkOutlookAddIn
             else
             {
                 subscription.MarkInspector(inspectorIdentityKey);
+                subscription.BindInspectorLifecycle(inspector);
             }
             return subscription;
         }

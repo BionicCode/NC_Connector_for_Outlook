@@ -51,7 +51,7 @@ namespace NcTalkOutlookAddIn.Services
                 TimeSpan delay = ResolveRetryDelay(response, attempt);
                 DiagnosticsLogger.Log(
                     LogCategories.FileLink,
-                    "Upload request retry scheduled (operation="
+                    "FileLink request retry scheduled (operation="
                     + operation
                     + ", attempt="
                     + (attempt + 1).ToString(CultureInfo.InvariantCulture)
