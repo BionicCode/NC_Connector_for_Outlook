@@ -6,9 +6,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Web;
+using AngleSharp.Dom;
+using AngleSharp.Html.Parser;
 using NcTalkOutlookAddIn.Models;
 
 namespace NcTalkOutlookAddIn.Utilities
@@ -580,9 +583,30 @@ namespace NcTalkOutlookAddIn.Utilities
             string linkIntro,
             string linkLabel)
         {
-            string output = attachmentMode
-                ? StripTemplateRow(template, "RIGHTS")
-                : template;
+            var emptyPlaceholders = new List<string>();
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                emptyPlaceholders.Add("URL");
+            }
+            if (string.IsNullOrWhiteSpace(password))
+            {
+                emptyPlaceholders.Add("PASSWORD");
+            }
+            if (string.IsNullOrWhiteSpace(expirationDate))
+            {
+                emptyPlaceholders.Add("EXPIRATIONDATE");
+            }
+            if (attachmentMode || string.IsNullOrWhiteSpace(rights))
+            {
+                emptyPlaceholders.Add("RIGHTS");
+            }
+            if (string.IsNullOrWhiteSpace(note))
+            {
+                emptyPlaceholders.Add("NOTE");
+            }
+            string output = PruneEmptyTemplatePlaceholders(
+                template,
+                emptyPlaceholders);
             output = output.Replace("{URL}", url);
             output = output.Replace("{PASSWORD}", password);
             output = output.Replace("{EXPIRATIONDATE}", expirationDate);
@@ -706,58 +730,76 @@ namespace NcTalkOutlookAddIn.Utilities
             internal string LinkLabel { get; set; }
         }
 
-                // Remove one placeholder row from backend-provided HTML templates.
-        // This is used to reduce the custom share block for attachment mode.
-        private static string StripTemplateRow(string template, string placeholder)
+                // Remove the nearest block wrapper for empty template values.
+        private static string PruneEmptyTemplatePlaceholders(
+            string template,
+            IList<string> placeholders)
         {
-            string token = "{" + (placeholder ?? string.Empty).Trim() + "}";
-            if (string.IsNullOrWhiteSpace(token) || string.Equals(token, "{}", StringComparison.Ordinal))
+            string source = template ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(source)
+                || placeholders == null
+                || placeholders.Count == 0)
             {
-                return template ?? string.Empty;
+                return source;
             }
-            string output = template ?? string.Empty;
-            int tokenIndex = output.IndexOf(token, StringComparison.Ordinal);
-            if (tokenIndex < 0)
-            {
-                return output;
-            }
-            int rowStart = LastIndexOfIgnoreCase(output, "<tr", tokenIndex);
-            int rowEnd = IndexOfIgnoreCase(output, "</tr>", tokenIndex);
-            if (rowStart >= 0 && rowEnd >= 0 && rowEnd >= rowStart)
-            {
-                output = output.Remove(rowStart, (rowEnd + 5) - rowStart);
-            }
-            return output.Replace(token, string.Empty);
-        }
 
-                // Case-insensitive search for the last occurrence before one absolute index.
-        private static int LastIndexOfIgnoreCase(string value, string search, int startIndexExclusive)
-        {
-            if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(search))
+            var tokens = new List<string>();
+            foreach (string placeholder in placeholders)
             {
-                return -1;
+                string normalized = (placeholder ?? string.Empty).Trim();
+                if (normalized.Length == 0)
+                {
+                    continue;
+                }
+                string token = "{" + normalized + "}";
+                if (source.IndexOf(token, StringComparison.Ordinal) >= 0
+                    && !tokens.Contains(token, StringComparer.Ordinal))
+                {
+                    tokens.Add(token);
+                }
             }
-            int maxIndex = Math.Min(startIndexExclusive, value.Length);
-            if (maxIndex <= 0)
+            if (tokens.Count == 0)
             {
-                return -1;
+                return source;
             }
-            return value.LastIndexOf(search, maxIndex - 1, StringComparison.OrdinalIgnoreCase);
-        }
 
-                // Case-insensitive forward search.
-        private static int IndexOfIgnoreCase(string value, string search, int startIndex)
-        {
-            if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(search))
+            var parser = new HtmlParser();
+            var document = parser.ParseDocument(source);
+            IElement body = document != null ? document.Body : null;
+            if (body == null)
             {
-                return -1;
+                throw new InvalidOperationException(
+                    "Share template could not be parsed for placeholder pruning.");
             }
-            int normalizedStart = Math.Max(0, startIndex);
-            if (normalizedStart >= value.Length)
+
+            foreach (string token in tokens)
             {
-                return -1;
+                IElement[] candidates = body
+                    .QuerySelectorAll(
+                        "tr,li,p,div,section,article,aside,header,footer")
+                    .ToArray();
+                for (int index = candidates.Length - 1;
+                    index >= 0;
+                    index--)
+                {
+                    IElement candidate = candidates[index];
+                    if (candidate.Parent == null
+                        || candidate.InnerHtml.IndexOf(
+                            token,
+                            StringComparison.Ordinal) < 0)
+                    {
+                        continue;
+                    }
+                    candidate.Remove();
+                }
             }
-            return value.IndexOf(search, normalizedStart, StringComparison.OrdinalIgnoreCase);
+
+            string output = body.InnerHtml;
+            foreach (string token in tokens)
+            {
+                output = output.Replace(token, string.Empty);
+            }
+            return output;
         }
 
                 // Adds a table row with label and content.
