@@ -311,12 +311,64 @@ internal static class OutlookFileLinkRenderingTests
         return element;
     }
 
+    private static void AssertAttributeAndTextSafeCustomTemplateValue(
+        string caseName,
+        string html,
+        string expectedTagName,
+        string attributeName,
+        string expectedValue,
+        string placeholder)
+    {
+        var document = new HtmlParser().ParseDocument(
+            "<!doctype html><html><body>" + (html ?? string.Empty) + "</body></html>");
+        IElement body = document.Body;
+
+        Check(caseName + " has a parsed body", body != null, html);
+        Check(
+            caseName + " has one top-level element",
+            body != null && body.Children.Count() == 1,
+            html);
+        Check(
+            caseName + " contains no unresolved placeholder",
+            (html ?? string.Empty).IndexOf(placeholder, StringComparison.Ordinal) < 0,
+            html);
+        Check(
+            caseName + " contains no no-break element",
+            body != null && body.QuerySelectorAll("nobr").Count() == 0,
+            html);
+
+        if (body == null || body.Children.Count() != 1)
+        {
+            return;
+        }
+
+        IElement element = body.Children.First();
+        Check(
+            caseName + " preserves the expected element",
+            string.Equals(element.TagName, expectedTagName, StringComparison.OrdinalIgnoreCase),
+            element.OuterHtml);
+        AttributeEquals(caseName + " preserves the attribute value", element, attributeName, expectedValue);
+        Check(
+            caseName + " attribute contains no no-break fragment",
+            (element.GetAttribute(attributeName) ?? string.Empty).IndexOf("<nobr", StringComparison.OrdinalIgnoreCase) < 0,
+            element.OuterHtml);
+        Check(
+            caseName + " preserves visible text",
+            string.Equals(element.TextContent, expectedValue, StringComparison.Ordinal),
+            element.OuterHtml);
+        Check(
+            caseName + " keeps the replacement as text",
+            element.Children.Count() == 0,
+            element.OuterHtml);
+    }
+
     private static void AssertPlainTextNoBreakContract(string caseName, string plainText)
     {
         Check(caseName + " keeps ASCII-hyphen date", plainText.Contains("2026-08-01"), plainText);
         Check(caseName + " keeps ordinary-space label", plainText.Contains("Nextcloud link"), plainText);
         Check(caseName + " contains no nobr markup", plainText.IndexOf("<nobr", StringComparison.OrdinalIgnoreCase) < 0, plainText);
         Check(caseName + " contains no non-breaking-space entity", plainText.IndexOf("&nbsp;", StringComparison.OrdinalIgnoreCase) < 0, plainText);
+        Check(caseName + " contains no HTML entity", !Regex.IsMatch(plainText, @"&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);", RegexOptions.IgnoreCase), plainText);
         Check(caseName + " contains no non-breaking hyphen", !ContainsCodePoint(plainText, '\u2011'), plainText);
         Check(caseName + " contains no non-breaking space", !ContainsCodePoint(plainText, '\u00A0'), plainText);
     }
@@ -559,19 +611,45 @@ internal static class OutlookFileLinkRenderingTests
         AssertNoBreakFieldLabel("Built-in Nextcloud link field label", html, "Nextcloud link");
     }
 
-    private static void TestCustomTemplateNoBreakValues()
+    private static void TestCustomTemplateAttributeSafeValues()
     {
-        const string template = "<p>{LINK_LABEL}</p><p>{EXPIRATIONDATE}</p>";
-        BackendPolicyStatus policy = BuildCustomTemplatePolicy(template);
+        const string expirationTemplate = "<time datetime=\"{EXPIRATIONDATE}\">{EXPIRATIONDATE}</time>";
+        BackendPolicyStatus expirationPolicy = BuildCustomTemplatePolicy(expirationTemplate);
         FileLinkResult result = BuildResult(
             "https://cloud.example.test/nc/s/AbCd1234",
             "AbCd1234",
             string.Empty,
             new DateTime(2026, 8, 1));
-        string html = FileLinkHtmlBuilder.Build(result, new FileLinkRequest(), "custom", policy);
+        string expirationHtml = FileLinkHtmlBuilder.Build(
+            result,
+            new FileLinkRequest(),
+            "custom",
+            expirationPolicy);
 
-        AssertNoBreakDate("Custom-template expiration date", html, "2026-08-01");
-        AssertNoBreakFieldLabel("Custom-template LINK_LABEL", html, "Nextcloud link");
+        AssertAttributeAndTextSafeCustomTemplateValue(
+            "Custom-template expiration date",
+            expirationHtml,
+            "time",
+            "datetime",
+            "2026-08-01",
+            "{EXPIRATIONDATE}");
+
+        const string labelTemplate = "<span title=\"{LINK_LABEL}\">{LINK_LABEL}</span>";
+        const string expectedLabel = "Nextcloud & \"link\" <safe>";
+        BackendPolicyStatus labelPolicy = BuildCustomTemplatePolicy(labelTemplate, null, "fr");
+        string labelHtml = FileLinkHtmlBuilder.Build(
+            result,
+            new FileLinkRequest(),
+            "custom",
+            labelPolicy);
+
+        AssertAttributeAndTextSafeCustomTemplateValue(
+            "Custom-template LINK_LABEL",
+            labelHtml,
+            "span",
+            "title",
+            expectedLabel,
+            "{LINK_LABEL}");
     }
 
     private static void TestPlainTextNoBreakContract()
@@ -598,7 +676,7 @@ internal static class OutlookFileLinkRenderingTests
         Strings.SetPreferredUiLanguage("en");
         TestHtmlNoBreakEncoderContract();
         TestBuiltInNoBreakValues();
-        TestCustomTemplateNoBreakValues();
+        TestCustomTemplateAttributeSafeValues();
         TestPlainTextNoBreakContract();
         TestPermissionsHtmlContract();
         TestNormalModeUsesNextcloudLinkWording();
@@ -903,9 +981,21 @@ internal static class OutlookFileLinkRenderingTests
     Get-ChildItem -Path $vendorDir -Filter "*.dll" | ForEach-Object {
         $references += "/reference:$($_.FullName)"
     }
+
+	# Use a synthetic localized label containing HTML-sensitive characters so the
+	# custom-template tests exercise both visible-text and attribute substitution.
+    $attributeSafetyLocale = Join-Path $TempRoot "attribute-safety-messages.json"
+    @'
+{
+  "sharing_html_share_link_label": {
+    "message": "Nextcloud & \"link\" <safe>"
+  }
+}
+'@ | Set-Content -Path $attributeSafetyLocale -Encoding UTF8
     $resources = @(
         "/resource:$((Resolve-Path (Join-Path $ProjectRoot 'src\NcTalkOutlookAddIn\Resources\_locales\en\messages.json')).Path),OutlookFileLinkRenderingTests.Resources._locales.en.messages.json",
-        "/resource:$((Resolve-Path (Join-Path $ProjectRoot 'src\NcTalkOutlookAddIn\Resources\_locales\de\messages.json')).Path),OutlookFileLinkRenderingTests.Resources._locales.de.messages.json"
+        "/resource:$((Resolve-Path (Join-Path $ProjectRoot 'src\NcTalkOutlookAddIn\Resources\_locales\de\messages.json')).Path),OutlookFileLinkRenderingTests.Resources._locales.de.messages.json",
+        "/resource:$((Resolve-Path $attributeSafetyLocale).Path),OutlookFileLinkRenderingTests.Resources._locales.fr.messages.json"
     )
 
     $exe = Join-Path $TempRoot "OutlookFileLinkRenderingTests.exe"
