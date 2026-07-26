@@ -457,16 +457,20 @@ namespace NcTalkOutlookAddIn.Utilities
                         Strings.GetInLanguage(effectiveLanguage, "sharing_html_secret_link_label", "Secret link"),
                         BrandingAssets.BrandBlueHex)
                     : HttpUtility.HtmlEncode(values.Password);
+
+            // Policy placeholders may occur in either visible content or HTML attributes.
+            // Keep replacements context-neutral and attribute-safe until the template
+            // renderer supports context-aware substitution.
             string html = ReplacePolicyTemplatePlaceholders(
                 template,
                 attachmentMode,
                 HttpUtility.HtmlEncode(values.LinkUrl ?? string.Empty),
                 passwordReplacement,
-                HtmlNoBreakEncoder.EncodeDateTime(values.ExpirationDate),
+                HttpUtility.HtmlEncode(values.ExpirationDate),
                 values.Rights,
                 HttpUtility.HtmlEncode(values.Note),
                 HttpUtility.HtmlEncode(values.LinkIntro),
-                HtmlNoBreakEncoder.EncodeFieldLabel(values.LinkLabel));
+                HttpUtility.HtmlEncode(values.LinkLabel));
 
             string sanitized = HtmlTemplateSanitizer.SanitizeShareTemplateHtml(html);
             if (string.IsNullOrWhiteSpace(sanitized))
