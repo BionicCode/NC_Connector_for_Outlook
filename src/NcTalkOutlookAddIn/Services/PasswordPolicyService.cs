@@ -4,7 +4,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Net;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Utilities;

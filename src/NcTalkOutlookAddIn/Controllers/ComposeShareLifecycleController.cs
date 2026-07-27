@@ -180,8 +180,7 @@ namespace NcTalkOutlookAddIn.Controllers
                     resolvedRecipients = PopulatePasswordMail(
                         passwordMail,
                         dispatch,
-                        composeKey,
-                        true);
+                        composeKey);
 
                     NextcloudTalkAddIn.LogFileLinkMessage(
                         "Separate password mail direct send start (composeKey="
@@ -286,8 +285,7 @@ namespace NcTalkOutlookAddIn.Controllers
         private List<string> PopulatePasswordMail(
             Outlook.MailItem mail,
             SeparatePasswordDispatchEntry dispatch,
-            string composeKey,
-            bool requireSourceIdentity)
+            string composeKey)
         {
             if (mail == null || !IsDispatchUsable(dispatch))
             {
@@ -301,7 +299,7 @@ namespace NcTalkOutlookAddIn.Controllers
                     mail,
                     dispatch,
                     composeKey,
-                    requireSourceIdentity);
+                    true);
             ApplySeparatePasswordBody(mail, dispatch);
             ApplySeparatePasswordBackendSignature(
                 mail,

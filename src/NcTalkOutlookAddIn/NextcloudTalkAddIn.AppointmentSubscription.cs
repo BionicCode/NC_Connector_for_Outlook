@@ -5,7 +5,6 @@
 using System;
 using System.Globalization;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Utilities;
 using Outlook = Microsoft.Office.Interop.Outlook;

@@ -4,9 +4,7 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Net;
-using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 using NcTalkOutlookAddIn.Utilities;

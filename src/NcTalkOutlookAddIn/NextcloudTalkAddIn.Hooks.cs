@@ -3,7 +3,6 @@
 // See LICENSE.txt for details.
 
 using System;
-using NcTalkOutlookAddIn.Controllers;
 using NcTalkOutlookAddIn.Utilities;
 using Outlook = Microsoft.Office.Interop.Outlook;
 
