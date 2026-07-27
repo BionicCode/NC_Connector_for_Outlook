@@ -101,13 +101,7 @@ namespace NcTalkOutlookAddIn.UI
             bool lockPermWrite = IsPolicyLocked("share_permission_edit");
             bool lockPermDelete = IsPolicyLocked("share_permission_delete");
             bool lockPassword = IsPolicyLocked("share_set_password");
-            bool lockPasswordSeparate = IsPolicyLocked("share_send_password_separately");
-            bool lockPasswordDeliveryMode = IsPolicyLocked("share_send_password_mode");
             bool lockExpireDays = IsPolicyLocked("share_expire_days");
-            bool separatePasswordAvailable = PolicyUiHelper.HasBackendSeatEntitlement(_backendPolicyStatus);
-            string separatePasswordUnavailableTooltip = PolicyUiHelper.GetSeparatePasswordUnavailableTooltip(_backendPolicyStatus);
-            bool passwordDeliveryModeAvailable = PolicyUiHelper.HasPasswordDeliveryMode(_backendPolicyStatus);
-            string passwordDeliveryUnavailableTooltip = PolicyUiHelper.GetPasswordDeliveryModeUnavailableTooltip(_backendPolicyStatus);
 
             _shareNameTextBox.ReadOnly = _attachmentMode || lockShareName;
             _permissionCreateCheckBox.Enabled = !_attachmentMode && !lockPermCreate;
@@ -127,25 +121,6 @@ namespace NcTalkOutlookAddIn.UI
                 (Control)null,
                 _passwordGenerateButton,
                 _passwordTextBox);
-            _disabledTooltipHints.Apply(
-                _passwordSeparateToggleCheckBox,
-                !separatePasswordAvailable
-                    ? separatePasswordUnavailableTooltip
-                    : (lockPasswordSeparate ? Strings.PolicyAdminControlledTooltip : string.Empty),
-                !separatePasswordAvailable || lockPasswordSeparate,
-                (Control)null,
-                _passwordTextBox);
-            _disabledTooltipHints.Apply(
-                _passwordDeliveryModeCombo,
-                !passwordDeliveryModeAvailable
-                    ? passwordDeliveryUnavailableTooltip
-                    : (lockPasswordDeliveryMode
-                        ? Strings.PolicyAdminControlledTooltip
-                        : (!_passwordSeparateToggleCheckBox.Checked ? Strings.SharingPasswordDeliveryEnableSeparateTooltip : string.Empty)),
-                !passwordDeliveryModeAvailable
-                    || lockPasswordDeliveryMode
-                    || !_passwordSeparateToggleCheckBox.Checked,
-                _passwordDeliveryModeLabel);
             _disabledTooltipHints.Apply(_expireToggleCheckBox, lockExpireDays ? Strings.PolicyAdminControlledTooltip : string.Empty, lockExpireDays, _expireHintLabel);
             _disabledTooltipHints.Apply(_expireDatePicker, lockExpireDays ? Strings.PolicyAdminControlledTooltip : string.Empty, false, _expireHintLabel);
 

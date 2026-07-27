@@ -76,28 +76,10 @@ namespace NcTalkOutlookAddIn.Utilities
             string brandBlue = BrandingAssets.BrandBlueHex;
 
             var builder = new StringBuilder();
-            builder.AppendLine("<div style=\"font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:11pt;margin:16px 0;\">");
-            builder.AppendLine("<table role=\"presentation\" width=\"640\" style=\"border-collapse:separate;border-spacing:0;width:640px;margin:0;background-color:transparent;border:1px solid #d7d7db;border-radius:8px;overflow:hidden;\">");
-            builder.AppendLine("<tr>");
-            builder.AppendLine("<td style=\"padding:0;\">");
-            builder.AppendLine("<table role=\"presentation\" width=\"640\" style=\"border-collapse:collapse;width:640px;margin:0;background-color:transparent;\">");
-            builder.AppendLine("<tr>");
-            builder.AppendFormat(CultureInfo.InvariantCulture, "<td height=\"32\" bgcolor=\"{0}\" style=\"padding:0;background-color:{0};text-align:center;height:32px;line-height:0;font-size:0;mso-line-height-rule:exactly;\">", brandBlue);
-            builder.AppendLine();
-            builder.AppendFormat(
-                CultureInfo.InvariantCulture,
-                "<a href=\"{0}\" style=\"display:block;text-decoration:none;line-height:0;font-size:0;\" target=\"_blank\" rel=\"noopener\">",
-                HomepageUrl);
-            builder.AppendLine();
-            builder.AppendFormat(
-                CultureInfo.InvariantCulture,
-                "<img alt=\"\" height=\"32\" style=\"display:block;width:auto;height:32px;max-width:164px;object-fit:contain;border:0;margin:0 auto;\" src=\"data:image/png;base64,{0}\" />",
-                HeaderBase64.Value);
-            builder.AppendLine("</a>");
-            builder.AppendLine("</td>");
-            builder.AppendLine("</tr>");
-            builder.AppendLine("</table>");
-            builder.AppendLine("<div style=\"padding:18px 18px 12px 18px;\">");
+            AppendOutlookFrameStart(
+                builder,
+                brandBlue,
+                closeHeaderAnchorOnImageLine: true);
             if (request != null && request.NoteEnabled && !string.IsNullOrWhiteSpace(request.Note))
             {
                 builder.AppendFormat(
@@ -136,14 +118,13 @@ namespace NcTalkOutlookAddIn.Utilities
 
             builder.AppendLine("</table>");
             builder.AppendLine("</div>");
-            builder.AppendLine("<div style=\"padding:10px 18px 16px 18px;font-size:9pt;font-style:italic;\">");
             string nextcloudLink = string.Format(CultureInfo.InvariantCulture, "<a href=\"https://nextcloud.com/\" style=\"color:{0};text-decoration:none;\">Nextcloud</a>", brandBlue);
-            builder.AppendLine(string.Format(CultureInfo.InvariantCulture, footerFormat, nextcloudLink));
-            builder.AppendLine("</div>");
-            builder.AppendLine("</td>");
-            builder.AppendLine("</tr>");
-            builder.AppendLine("</table>");
-            builder.AppendLine("</div>");
+            AppendOutlookFrameEnd(
+                builder,
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    footerFormat,
+                    nextcloudLink));
             return builder.ToString();
         }
 
@@ -184,29 +165,10 @@ namespace NcTalkOutlookAddIn.Utilities
             string brandBlue = BrandingAssets.BrandBlueHex;
 
             var builder = new StringBuilder();
-            builder.AppendLine("<div style=\"font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:11pt;margin:16px 0;\">");
-            builder.AppendLine("<table role=\"presentation\" width=\"640\" style=\"border-collapse:separate;border-spacing:0;width:640px;margin:0;background-color:transparent;border:1px solid #d7d7db;border-radius:8px;overflow:hidden;\">");
-            builder.AppendLine("<tr>");
-            builder.AppendLine("<td style=\"padding:0;\">");
-            builder.AppendLine("<table role=\"presentation\" width=\"640\" style=\"border-collapse:collapse;width:640px;margin:0;background-color:transparent;\">");
-            builder.AppendLine("<tr>");
-            builder.AppendFormat(CultureInfo.InvariantCulture, "<td height=\"32\" bgcolor=\"{0}\" style=\"padding:0;background-color:{0};text-align:center;height:32px;line-height:0;font-size:0;mso-line-height-rule:exactly;\">", brandBlue);
-            builder.AppendLine();
-            builder.AppendFormat(
-                CultureInfo.InvariantCulture,
-                "<a href=\"{0}\" style=\"display:block;text-decoration:none;line-height:0;font-size:0;\" target=\"_blank\" rel=\"noopener\">",
-                HomepageUrl);
-            builder.AppendLine();
-            builder.AppendFormat(
-                CultureInfo.InvariantCulture,
-                "<img alt=\"\" height=\"32\" style=\"display:block;width:auto;height:32px;max-width:164px;object-fit:contain;border:0;margin:0 auto;\" src=\"data:image/png;base64,{0}\" />",
-                HeaderBase64.Value);
-            builder.AppendLine();
-            builder.AppendLine("</a>");
-            builder.AppendLine("</td>");
-            builder.AppendLine("</tr>");
-            builder.AppendLine("</table>");
-            builder.AppendLine("<div style=\"padding:18px 18px 12px 18px;\">");
+            AppendOutlookFrameStart(
+                builder,
+                brandBlue,
+                closeHeaderAnchorOnImageLine: false);
             builder.AppendLine("<p style=\"margin:0 0 14px 0;line-height:1.4;\">" + HttpUtility.HtmlEncode(intro) + "<br /></p>");
             builder.AppendLine("<table style=\"width:100%;border-collapse:collapse;margin-bottom:10px;\">");
             AppendRow(builder, passwordLabel, secretLink
@@ -214,10 +176,7 @@ namespace NcTalkOutlookAddIn.Utilities
                 : BuildPasswordValueHtml(result.Password));
             builder.AppendLine("</table>");
             builder.AppendLine("</div>");
-            builder.AppendLine("</td>");
-            builder.AppendLine("</tr>");
-            builder.AppendLine("</table>");
-            builder.AppendLine("</div>");
+            AppendOutlookFrameEnd(builder, null);
             return builder.ToString();
         }
 
@@ -626,7 +585,6 @@ namespace NcTalkOutlookAddIn.Utilities
                     "sharing_html_zip_download_intro",
                     "The files have been provided securely via Nextcloud. Download the shared files as a ZIP archive using the link below.");
             }
-
             return Strings.GetInLanguage(
                 effectiveLanguage,
                 plainText ? "sharing_html_intro_line" : "sharing_html_intro",
@@ -800,6 +758,55 @@ namespace NcTalkOutlookAddIn.Utilities
                 output = output.Replace(token, string.Empty);
             }
             return output;
+        }
+
+        private static void AppendOutlookFrameStart(
+            StringBuilder builder,
+            string brandBlue,
+            bool closeHeaderAnchorOnImageLine)
+        {
+            builder.AppendLine("<div style=\"font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:11pt;margin:16px 0;\">");
+            builder.AppendLine("<table role=\"presentation\" width=\"640\" style=\"border-collapse:separate;border-spacing:0;width:640px;margin:0;background-color:transparent;border:1px solid #d7d7db;border-radius:8px;overflow:hidden;\">");
+            builder.AppendLine("<tr>");
+            builder.AppendLine("<td style=\"padding:0;\">");
+            builder.AppendLine("<table role=\"presentation\" width=\"640\" style=\"border-collapse:collapse;width:640px;margin:0;background-color:transparent;\">");
+            builder.AppendLine("<tr>");
+            builder.AppendFormat(CultureInfo.InvariantCulture, "<td height=\"32\" bgcolor=\"{0}\" style=\"padding:0;background-color:{0};text-align:center;height:32px;line-height:0;font-size:0;mso-line-height-rule:exactly;\">", brandBlue);
+            builder.AppendLine();
+            builder.AppendFormat(
+                CultureInfo.InvariantCulture,
+                "<a href=\"{0}\" style=\"display:block;text-decoration:none;line-height:0;font-size:0;\" target=\"_blank\" rel=\"noopener\">",
+                HomepageUrl);
+            builder.AppendLine();
+            builder.AppendFormat(
+                CultureInfo.InvariantCulture,
+                "<img alt=\"\" height=\"32\" style=\"display:block;width:auto;height:32px;max-width:164px;object-fit:contain;border:0;margin:0 auto;\" src=\"data:image/png;base64,{0}\" />",
+                HeaderBase64.Value);
+            if (!closeHeaderAnchorOnImageLine)
+            {
+                builder.AppendLine();
+            }
+            builder.AppendLine("</a>");
+            builder.AppendLine("</td>");
+            builder.AppendLine("</tr>");
+            builder.AppendLine("</table>");
+            builder.AppendLine("<div style=\"padding:18px 18px 12px 18px;\">");
+        }
+
+        private static void AppendOutlookFrameEnd(
+            StringBuilder builder,
+            string footerHtml)
+        {
+            if (footerHtml != null)
+            {
+                builder.AppendLine("<div style=\"padding:10px 18px 16px 18px;font-size:9pt;font-style:italic;\">");
+                builder.AppendLine(footerHtml);
+                builder.AppendLine("</div>");
+            }
+            builder.AppendLine("</td>");
+            builder.AppendLine("</tr>");
+            builder.AppendLine("</table>");
+            builder.AppendLine("</div>");
         }
 
                 // Adds a table row with label and content.
