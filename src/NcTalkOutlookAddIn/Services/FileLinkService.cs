@@ -136,6 +136,7 @@ namespace NcTalkOutlookAddIn.Services
                     cancellationToken);
                 _transferService.PrepareBulkChecksums(
                     plan,
+                    phaseProgress,
                     cancellationToken);
                 LogUploadPlan(selections.Count, plan);
 

@@ -857,6 +857,9 @@
   "sharing_status_scanning": {
     "message": "Skanowanie plików i folderów..."
   },
+  "sharing_status_calculating_checksums": {
+    "message": "Obliczanie sum kontrolnych ($1 / $2)..."
+  },
   "sharing_status_preparing_folders": {
     "message": "Przygotowywanie folderów ($1 / $2)..."
   },
@@ -973,9 +976,6 @@
   },
   "sharing_status_ready": {
     "message": "Przesyłanie zakończone."
-  },
-  "sharing_status_uploading_bulk": {
-    "message": "Przesyłanie plików..."
   },
   "sharing_status_speed_kbps": {
     "message": "$1 KB/s"

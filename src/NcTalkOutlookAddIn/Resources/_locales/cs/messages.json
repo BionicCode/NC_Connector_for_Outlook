@@ -857,6 +857,9 @@
   "sharing_status_scanning": {
     "message": "Prohledávání souborů a složek..."
   },
+  "sharing_status_calculating_checksums": {
+    "message": "Výpočet kontrolních součtů ($1 / $2)..."
+  },
   "sharing_status_preparing_folders": {
     "message": "Příprava složek ($1 / $2)..."
   },
@@ -973,9 +976,6 @@
   },
   "sharing_status_ready": {
     "message": "Nahrávání dokončeno."
-  },
-  "sharing_status_uploading_bulk": {
-    "message": "Nahrávají se soubory..."
   },
   "sharing_status_speed_kbps": {
     "message": "$1 KB/s"

@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -29,6 +30,7 @@ namespace NcTalkOutlookAddIn.Services
 
         internal void PrepareChecksums(
             FileLinkUploadPlan plan,
+            Action<int, int> reportProgress,
             CancellationToken cancellationToken)
         {
             if (plan == null)
@@ -36,11 +38,36 @@ namespace NcTalkOutlookAddIn.Services
                 throw new ArgumentNullException("plan");
             }
 
-            foreach (FileLinkPlannedFile file in plan.BulkFiles)
+            int total = plan.BulkFiles.Count;
+            if (total == 0)
+            {
+                return;
+            }
+
+            if (reportProgress != null)
+            {
+                reportProgress(0, total);
+            }
+            var stopwatch = Stopwatch.StartNew();
+            long lastReportMs = 0;
+
+            for (int index = 0; index < total; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                FileLinkPlannedFile file = plan.BulkFiles[index];
                 file.BulkChecksum =
                     FileLinkSourceFile.ComputeMd5Hex(file);
+
+                int completed = index + 1;
+                long now = stopwatch.ElapsedMilliseconds;
+                if (reportProgress != null
+                    && (completed == total
+                        || now - lastReportMs
+                            >= FileLinkUploadProgress.ReportIntervalMs))
+                {
+                    lastReportMs = now;
+                    reportProgress(completed, total);
+                }
             }
         }
 

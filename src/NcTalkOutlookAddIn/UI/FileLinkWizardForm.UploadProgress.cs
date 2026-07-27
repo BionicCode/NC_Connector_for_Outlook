@@ -294,6 +294,20 @@ namespace NcTalkOutlookAddIn.UI
                         Strings.FileLinkWizardStatusScanning;
                     break;
 
+                case FileLinkUploadPhase.CalculatingChecksums:
+                    _progressBar.Style = ProgressBarStyle.Blocks;
+                    SetOverallProgressValue(
+                        CalculateProgressPercent(
+                            progress.CompletedFiles,
+                            progress.TotalFiles));
+                    _progressLabel.Text = string.Format(
+                        CultureInfo.CurrentCulture,
+                        Strings
+                            .FileLinkWizardStatusCalculatingChecksumsFormat,
+                        progress.CompletedFiles,
+                        progress.TotalFiles);
+                    break;
+
                 case FileLinkUploadPhase.PreparingFolders:
                     _progressBar.Style = ProgressBarStyle.Blocks;
                     SetOverallProgressValue(

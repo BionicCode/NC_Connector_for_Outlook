@@ -7,6 +7,7 @@ namespace NcTalkOutlookAddIn.Models
     internal enum FileLinkUploadPhase
     {
         Scanning,
+        CalculatingChecksums,
         PreparingFolders,
         Uploading,
         Completed

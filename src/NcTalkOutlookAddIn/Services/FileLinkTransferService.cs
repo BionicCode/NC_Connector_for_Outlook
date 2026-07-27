@@ -35,9 +35,22 @@ namespace NcTalkOutlookAddIn.Services
 
         internal void PrepareBulkChecksums(
             FileLinkUploadPlan plan,
+            IProgress<FileLinkUploadPhaseProgress> phaseProgress,
             CancellationToken cancellationToken)
         {
-            _bulkUploader.PrepareChecksums(plan, cancellationToken);
+            _bulkUploader.PrepareChecksums(
+                plan,
+                (completed, total) =>
+                    FileLinkUploadProgress.ReportPhase(
+                        phaseProgress,
+                        FileLinkUploadPhase.CalculatingChecksums,
+                        0,
+                        0,
+                        completed,
+                        total,
+                        0,
+                        0),
+                cancellationToken);
         }
 
         internal void Upload(
