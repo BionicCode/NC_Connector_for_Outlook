@@ -103,15 +103,31 @@ namespace NcTalkOutlookAddIn.Services
                 baseUrl,
                 userId,
                 relativeFolderPath);
-            NcHttpResponse response = SendWithRetry(
-                () => CreateRequest("MKCOL", url, cancellationToken),
+            bool createResponseWasIndeterminate;
+            NcHttpResponse response = SendCollectionCreateWithRetry(
+                url,
                 "share_root",
                 cancellationToken,
-                null);
+                out createResponseWasIndeterminate);
             if (response != null
                 && response.HasHttpResponse
                 && response.StatusCode == HttpStatusCode.Created)
             {
+                return true;
+            }
+            if (createResponseWasIndeterminate
+                && (response == null
+                    || !response.HasHttpResponse
+                    || response.StatusCode
+                    == HttpStatusCode.MethodNotAllowed)
+                && CollectionExists(
+                    url,
+                    Strings.FileLinkWizardUploadFailed,
+                    cancellationToken))
+            {
+                DiagnosticsLogger.Log(
+                    LogCategories.FileLink,
+                    "Recovered share root creation after an indeterminate MKCOL result.");
                 return true;
             }
             if (response != null
@@ -294,6 +310,36 @@ namespace NcTalkOutlookAddIn.Services
             }
         }
 
+        private NcHttpResponse SendCollectionCreateWithRetry(
+            string url,
+            string operation,
+            CancellationToken cancellationToken,
+            out bool responseWasIndeterminate)
+        {
+            bool observedIndeterminateResponse = false;
+            NcHttpResponse response = SendWithRetry(
+                () => CreateRequest("MKCOL", url, cancellationToken),
+                operation,
+                cancellationToken,
+                null,
+                retryResponse =>
+                {
+                    if (retryResponse == null
+                        || !retryResponse.HasHttpResponse
+                        || FileLinkUploadPolicy
+                            .IsIndeterminateStatusCode(
+                                (int)retryResponse.StatusCode))
+                    {
+                        observedIndeterminateResponse = true;
+                    }
+                });
+            responseWasIndeterminate =
+                observedIndeterminateResponse
+                || response == null
+                || !response.HasHttpResponse;
+            return response;
+        }
+
         private void CreatePlannedDirectory(
             FileLinkUploadContext context,
             string remotePath,
@@ -306,25 +352,12 @@ namespace NcTalkOutlookAddIn.Services
                 context.NormalizedBaseUrl,
                 context.UserId,
                 fullPath);
-            bool createResponseWasIndeterminate = false;
-            NcHttpResponse response = SendWithRetry(
-                () => CreateRequest("MKCOL", url, cancellationToken),
+            bool createResponseWasIndeterminate;
+            NcHttpResponse response = SendCollectionCreateWithRetry(
+                url,
                 "planned_folder",
                 cancellationToken,
-                null,
-                retryResponse =>
-                {
-                    if (retryResponse == null
-                        || !retryResponse.HasHttpResponse
-                        || FileLinkUploadPolicy
-                            .IsIndeterminateStatusCode(
-                                (int)retryResponse.StatusCode))
-                    {
-                        createResponseWasIndeterminate = true;
-                    }
-                });
-            createResponseWasIndeterminate |= response == null
-                                              || !response.HasHttpResponse;
+                out createResponseWasIndeterminate);
             if (response != null
                 && response.HasHttpResponse
                 && response.StatusCode == HttpStatusCode.Created)

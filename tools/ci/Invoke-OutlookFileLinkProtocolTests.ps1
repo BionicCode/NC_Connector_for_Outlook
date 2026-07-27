@@ -244,7 +244,7 @@ internal static class FileLinkProtocolTests
         TestExistingResourcePreflight();
         TestUnauthorizedPreflight();
         TestKnownRootCollision();
-        TestIndeterminateRootCollision();
+        TestIndeterminateRootRecovery();
         TestShareFolderDeleteRetry();
         TestOwnedDirectoryRecovery();
         TestInsufficientStorage();
@@ -420,7 +420,7 @@ internal static class FileLinkProtocolTests
         Equal("Known collision does not probe", "MKCOL", requests[0].Method);
     }
 
-    private static void TestIndeterminateRootCollision()
+    private static void TestIndeterminateRootRecovery()
     {
         var requests = new List<NcHttpRequestOptions>();
         int requestIndex = 0;
@@ -438,7 +438,22 @@ internal static class FileLinkProtocolTests
                         WebExceptionStatus.Timeout)
                 };
             }
-            return Http(HttpStatusCode.MethodNotAllowed);
+            if (requestIndex == 2)
+            {
+                return Http(HttpStatusCode.MethodNotAllowed);
+            }
+            return new NcHttpResponse
+            {
+                HasHttpResponse = true,
+                StatusCode = (HttpStatusCode)207,
+                ResponseText =
+                    "<?xml version=\"1.0\"?>"
+                    + "<d:multistatus xmlns:d=\"DAV:\">"
+                    + "<d:response><d:propstat><d:prop>"
+                    + "<d:resourcetype><d:collection/>"
+                    + "</d:resourcetype></d:prop>"
+                    + "</d:propstat></d:response></d:multistatus>"
+            };
         });
 
         bool created = client.TryCreateShareRoot(
@@ -447,10 +462,21 @@ internal static class FileLinkProtocolTests
             "NC Connector/share",
             CancellationToken.None);
         Check(
-            "Indeterminate MKCOL followed by 405 remains a collision",
-            !created);
-        Equal("Indeterminate collision request count", 2, requests.Count);
-        Equal("Indeterminate collision does not probe", "MKCOL", requests[1].Method);
+            "Indeterminate share-root MKCOL is recovered",
+            created);
+        Equal("Share-root recovery request count", 3, requests.Count);
+        Equal(
+            "Share-root recovery uses PROPFIND",
+            "PROPFIND",
+            requests[2].Method);
+        Equal(
+            "Share-root recovery uses Depth 0",
+            "0",
+            requests[2].Headers["Depth"]);
+        Equal(
+            "Share-root recovery probes the exact target",
+            requests[0].Url,
+            requests[2].Url);
     }
 
     private static void TestOwnedDirectoryRecovery()
