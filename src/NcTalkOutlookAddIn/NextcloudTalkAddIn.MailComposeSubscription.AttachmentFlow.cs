@@ -26,7 +26,9 @@ namespace NcTalkOutlookAddIn
         {
             private void OnAttachmentAdd(Outlook.Attachment attachment)
             {
-                if (_disposed || _attachmentSuppressed)
+                if (_disposed
+                    || _attachmentSuppressed
+                    || IsHiddenAttachment(attachment))
                 {
                     return;
                 }
@@ -48,7 +50,9 @@ namespace NcTalkOutlookAddIn
 
             private void OnBeforeAttachmentAdd(Outlook.Attachment attachment, ref bool cancel)
             {
-                if (_disposed || _attachmentSuppressed)
+                if (_disposed
+                    || _attachmentSuppressed
+                    || IsHiddenAttachment(attachment))
                 {
                     return;
                 }
@@ -713,6 +717,10 @@ namespace NcTalkOutlookAddIn
                             {
                                 continue;
                             }
+                            if (IsHiddenAttachment(attachment))
+                            {
+                                continue;
+                            }
 
                             snapshots.Add(new AttachmentSnapshot
                             {
@@ -1324,6 +1332,10 @@ namespace NcTalkOutlookAddIn
                             {
                                 continue;
                             }
+                            if (IsHiddenAttachment(attachment))
+                            {
+                                continue;
+                            }
                             string attachmentName = ReadAttachmentName(attachment);
                             string localPath;
                             if (!TryResolveAttachmentLocalPath(attachment, attachmentName, temporaryFiles, out localPath))
@@ -1536,6 +1548,10 @@ namespace NcTalkOutlookAddIn
                             {
                                 continue;
                             }
+                            if (IsHiddenAttachment(attachment))
+                            {
+                                continue;
+                            }
 
                             string currentName = ReadAttachmentName(attachment);
                             long currentSize = ReadAttachmentSizeBytes(attachment);
@@ -1653,51 +1669,15 @@ namespace NcTalkOutlookAddIn
             private void RemoveLastAddedAttachmentBatch(AttachmentBatchInfo lastAdded)
             {
                 int removeCount = lastAdded != null ? Math.Max(1, lastAdded.Count) : 1;
-
-                Outlook.Attachments attachments = null;
-                int removed = 0;
-                _attachmentSuppressed = true;
-                _pendingAddedBatch.Clear();
-
-                try
+                List<AttachmentSnapshot> attachments = SnapshotAttachments();
+                var removeIndices = new List<int>();
+                for (int index = attachments.Count - 1;
+                     index >= 0 && removeIndices.Count < removeCount;
+                     index--)
                 {
-                    attachments = _mail.Attachments;
-                    if (attachments == null || attachments.Count <= 0)
-                    {
-                        return;
-                    }
-                    int totalCount = attachments.Count;
-                    int effectiveCount = Math.Min(totalCount, removeCount);
-                    for (int i = 0; i < effectiveCount; i++)
-                    {
-                        attachments.Remove(attachments.Count);
-                        removed++;
-                    }
+                    removeIndices.Add(attachments[index].Index);
                 }
-                catch (Exception ex)
-                {
-                    DiagnosticsLogger.LogException(
-                        LogCategories.FileLink,
-                        "Failed to remove last attachment batch (composeKey=" + _composeKey + ").",
-                        ex);
-                }
-                finally
-                {
-                    ComInteropScope.TryRelease(
-                        attachments,
-                        LogCategories.FileLink,
-                        "Failed to release COM object (compose attachments collection remove_last).");
-                    EndAttachmentSuppression("remove_last_batch");
-                }
-
-                LogFileLink(
-                    "Compose attachment batch removed (composeKey="
-                    + _composeKey
-                    + ", requested="
-                    + removeCount.ToString(CultureInfo.InvariantCulture)
-                    + ", removed="
-                    + removed.ToString(CultureInfo.InvariantCulture)
-                    + ").");
+                RemoveAttachmentsByIndices(removeIndices, "remove_last_batch");
             }
 
             private void EndAttachmentSuppression(string trigger)

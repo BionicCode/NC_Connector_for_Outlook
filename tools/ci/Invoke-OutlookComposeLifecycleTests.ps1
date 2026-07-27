@@ -36,12 +36,42 @@ function Assert-NotContains(
     Assert-True $Name (-not $Source.Contains($Unexpected))
 }
 
+function Assert-Precedes(
+    [string]$Name,
+    [string]$Source,
+    [string]$First,
+    [string]$Second
+) {
+    $firstIndex = $Source.IndexOf($First, [StringComparison]::Ordinal)
+    $secondIndex = $Source.IndexOf($Second, [StringComparison]::Ordinal)
+    Assert-True $Name (
+        $firstIndex -ge 0 `
+            -and $secondIndex -gt $firstIndex)
+}
+
+function Get-MethodSlice(
+    [string]$Source,
+    [string]$Signature,
+    [string]$NextSignature
+) {
+    $start = $Source.IndexOf($Signature, [StringComparison]::Ordinal)
+    $end = $Source.IndexOf(
+        $NextSignature,
+        $start + $Signature.Length,
+        [StringComparison]::Ordinal)
+    if ($start -lt 0 -or $end -le $start) {
+        throw "Could not isolate method '$Signature'."
+    }
+    return $Source.Substring($start, $end - $start)
+}
+
 $pendingPath = "src\NcTalkOutlookAddIn\Controllers\PendingPasswordDraftController.cs"
 $composePath = "src\NcTalkOutlookAddIn\Controllers\ComposeShareLifecycleController.cs"
 $trackerPath = "src\NcTalkOutlookAddIn\Controllers\ComposeShareCleanupTracker.cs"
 $sendPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.MailComposeSubscription.Send.cs"
 $shareCleanupPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.MailComposeSubscription.ShareCleanup.cs"
 $subscriptionPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.MailComposeSubscription.cs"
+$attachmentFlowPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.MailComposeSubscription.AttachmentFlow.cs"
 $hooksPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.Hooks.cs"
 $fileLinkPath = "src\NcTalkOutlookAddIn\Controllers\FileLinkLaunchController.cs"
 $projectPath = "src\NcTalkOutlookAddIn\NcTalkOutlookAddIn.csproj"
@@ -52,9 +82,85 @@ $tracker = Read-Source $trackerPath
 $send = Read-Source $sendPath
 $shareCleanup = Read-Source $shareCleanupPath
 $subscription = Read-Source $subscriptionPath
+$attachmentFlow = Read-Source $attachmentFlowPath
 $hooks = Read-Source $hooksPath
 $fileLink = Read-Source $fileLinkPath
 $project = Read-Source $projectPath
+
+$attachmentAdd = Get-MethodSlice `
+    $attachmentFlow `
+    "private void OnAttachmentAdd(" `
+    "private void OnBeforeAttachmentAdd("
+$beforeAttachmentAdd = Get-MethodSlice `
+    $attachmentFlow `
+    "private void OnBeforeAttachmentAdd(" `
+    "private void OnPropertyChange("
+$snapshotAttachments = Get-MethodSlice `
+    $attachmentFlow `
+    "private List<AttachmentSnapshot> SnapshotAttachments()" `
+    "private static long SumAttachmentBytes("
+$hiddenAttachment = Get-MethodSlice `
+    $attachmentFlow `
+    "private static bool IsHiddenAttachment(" `
+    "private static void ShowForcedAttachmentProcessingError("
+$collectAttachments = Get-MethodSlice `
+    $attachmentFlow `
+    "private void CollectAttachmentSelectionsForShare(" `
+    "private bool TryResolveAttachmentLocalPath("
+$removeSuppressedAttachment = Get-MethodSlice `
+    $attachmentFlow `
+    "private void RemoveSuppressedBeforeAddAttachmentByName(" `
+    "private void RemoveAttachmentsByIndices("
+$removeLastAttachmentBatch = Get-MethodSlice `
+    $attachmentFlow `
+    "private void RemoveLastAddedAttachmentBatch(" `
+    "private void EndAttachmentSuppression("
+
+Assert-Precedes `
+    "Hidden attachments are ignored before post-add batching" `
+    $attachmentAdd `
+    "IsHiddenAttachment(attachment)" `
+    "_pendingAddedBatch.Add("
+Assert-Precedes `
+    "Hidden attachments are allowed before automation preflight" `
+    $beforeAttachmentAdd `
+    "IsHiddenAttachment(attachment)" `
+    "ReadAttachmentAutomationSettings()"
+Assert-Precedes `
+    "Hidden attachments are excluded from threshold snapshots" `
+    $snapshotAttachments `
+    "IsHiddenAttachment(attachment)" `
+    "snapshots.Add("
+Assert-Contains `
+    "Hidden attachment detection reads PR_ATTACHMENT_HIDDEN" `
+    $hiddenAttachment `
+    "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B"
+Assert-Contains `
+    "Hidden attachment PropertyAccessor is released" `
+    $hiddenAttachment `
+    "ComInteropScope.TryRelease("
+Assert-Precedes `
+    "Hidden attachments are excluded before FileLink materialization" `
+    $collectAttachments `
+    "IsHiddenAttachment(attachment)" `
+    "TryResolveAttachmentLocalPath("
+Assert-Precedes `
+    "Suppressed host cleanup preserves hidden attachments" `
+    $removeSuppressedAttachment `
+    "IsHiddenAttachment(attachment)" `
+    "ReadAttachmentName(attachment)"
+Assert-Contains `
+    "Last-batch removal starts from the visible attachment snapshot" `
+    $removeLastAttachmentBatch `
+    "List<AttachmentSnapshot> attachments = SnapshotAttachments();"
+Assert-Contains `
+    "Last-batch removal uses the filtered attachment indices" `
+    $removeLastAttachmentBatch `
+    'RemoveAttachmentsByIndices(removeIndices, "remove_last_batch");'
+Assert-NotContains `
+    "Last-batch removal does not delete the physical collection tail" `
+    $removeLastAttachmentBatch `
+    "attachments.Remove(attachments.Count)"
 
 Assert-Contains `
     "Primary send is cancelled when pending drafts cannot be persisted" `

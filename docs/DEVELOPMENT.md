@@ -298,6 +298,7 @@ Compose runtime parity additions in `NextcloudTalkAddIn.cs` (`MailComposeSubscri
   - queues files as initial wizard selections
   - opens directly in file-step-equivalent mode.
   - copies the effective attachment link target into `FileLinkRequest`; no per-share target switch is exposed.
+- Outlook body resources with `PR_ATTACHMENT_HIDDEN=true`, such as signature images, are excluded from attachment batching, threshold totals, FileLink selection, host removal, and the required-routing send gate.
 - `UI/FileLinkWizardForm.cs` file-step queue accepts Explorer drag & drop for files/folders across queue and action-area controls.
 - Compose insertion and pending-password lifecycle:
   - `ComposeLifecycleOrigin` retains the exact server/account origin needed to delete the created share or issue a later Secrets request. Cleanup never falls back to the currently selected account.
