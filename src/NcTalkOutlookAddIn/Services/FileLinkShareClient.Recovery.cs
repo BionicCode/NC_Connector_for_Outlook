@@ -101,6 +101,7 @@ namespace NcTalkOutlookAddIn.Services
                     CreateUnavailableException(null));
             }
 
+            bool hasPathlessPublicShare = false;
             foreach (IDictionary<string, object> share in shares)
             {
                 int shareType;
@@ -122,8 +123,12 @@ namespace NcTalkOutlookAddIn.Services
 
                 string returnedPath =
                     NcJson.GetTrimmedString(share, "path");
-                if (!string.IsNullOrWhiteSpace(returnedPath)
-                    && !string.Equals(
+                if (string.IsNullOrWhiteSpace(returnedPath))
+                {
+                    hasPathlessPublicShare = true;
+                    continue;
+                }
+                if (!string.Equals(
                         "/" + FileLinkPath.NormalizeRelativePath(
                             returnedPath),
                         requestedPath,
@@ -141,6 +146,11 @@ namespace NcTalkOutlookAddIn.Services
                 {
                     return ShareLookupResult.Found(result);
                 }
+            }
+            if (hasPathlessPublicShare)
+            {
+                return ShareLookupResult.Unknown(
+                    CreateUnavailableException(null));
             }
             return ShareLookupResult.Absent();
         }

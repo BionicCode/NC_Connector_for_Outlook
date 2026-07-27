@@ -250,6 +250,8 @@ internal static class FileLinkProtocolTests
         TestInsufficientStorage();
         TestShareCreateSingleRequest();
         TestShareCreateRecovery();
+        TestShareCreateMissingPathRecovery();
+        TestShareCreatePathlessEntryBeforeExactRecovery();
         TestShareCreateTransientRecovery();
         TestShareCreateMalformedRecovery();
         TestShareCreateAbsentRecovery();
@@ -686,6 +688,119 @@ internal static class FileLinkProtocolTests
             "Transient share recovery verifies with GET",
             "GET",
             requests[1].Method);
+    }
+
+    private static void TestShareCreateMissingPathRecovery()
+    {
+        var requests = new List<NcHttpRequestOptions>();
+        int postCount = 0;
+        var client = new FileLinkShareClient(options =>
+        {
+            requests.Add(options);
+            if (options.Method == "POST")
+            {
+                postCount++;
+                return new NcHttpResponse
+                {
+                    HasHttpResponse = false,
+                    TransportException = new WebException(
+                        "timeout",
+                        WebExceptionStatus.Timeout)
+                };
+            }
+            return JsonResponse(
+                "{\"ocs\":{\"meta\":{\"status\":\"ok\","
+                + "\"statuscode\":200,\"message\":\"OK\"},"
+                + "\"data\":[{\"id\":\"12\",\"share_type\":3,"
+                + "\"url\":\"https://cloud.example.test/s/unverified\","
+                + "\"token\":\"unverified\"}]}}");
+        });
+
+        int rejectedCount = 0;
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                client.Create(
+                    "https://cloud.example.test",
+                    "NC Connector/share",
+                    "Share",
+                    new FileLinkRequest
+                    {
+                        Permissions = FileLinkPermissionFlags.Read
+                    },
+                    CancellationToken.None);
+            }
+            catch (TalkServiceException)
+            {
+                rejectedCount++;
+            }
+        }
+
+        Equal(
+            "Share recovery rejects every result without its path",
+            2,
+            rejectedCount);
+        Equal(
+            "Missing-path recovery does not repeat the POST",
+            1,
+            postCount);
+        Equal(
+            "Missing-path recovery rechecks the share",
+            3,
+            requests.Count);
+        Equal(
+            "Missing-path recovery retries with GET",
+            "GET",
+            requests[2].Method);
+    }
+
+    private static void TestShareCreatePathlessEntryBeforeExactRecovery()
+    {
+        var requests = new List<NcHttpRequestOptions>();
+        var client = new FileLinkShareClient(options =>
+        {
+            requests.Add(options);
+            if (options.Method == "POST")
+            {
+                return new NcHttpResponse
+                {
+                    HasHttpResponse = false,
+                    TransportException = new WebException(
+                        "timeout",
+                        WebExceptionStatus.Timeout)
+                };
+            }
+            return JsonResponse(
+                "{\"ocs\":{\"meta\":{\"status\":\"ok\","
+                + "\"statuscode\":200,\"message\":\"OK\"},"
+                + "\"data\":["
+                + "{\"id\":\"12\",\"share_type\":3,"
+                + "\"url\":\"https://cloud.example.test/s/unverified\"},"
+                + "{\"id\":\"13\",\"share_type\":3,"
+                + "\"path\":\"/NC Connector/share\","
+                + "\"url\":\"https://cloud.example.test/s/exact\","
+                + "\"token\":\"exact\"}]}}");
+        });
+
+        FileLinkShareData result = client.Create(
+            "https://cloud.example.test",
+            "NC Connector/share",
+            "Share",
+            new FileLinkRequest
+            {
+                Permissions = FileLinkPermissionFlags.Read
+            },
+            CancellationToken.None);
+
+        Equal(
+            "Exact recovery wins over an earlier pathless result",
+            "13",
+            result.Id);
+        Equal(
+            "Mixed recovery sends only POST and GET",
+            2,
+            requests.Count);
     }
 
     private static void TestShareCreateAbsentRecovery()
