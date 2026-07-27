@@ -10,6 +10,7 @@ $SettingsWorkflowPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Controlle
 $SettingsFormPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\UI\SettingsForm.cs"
 $AddinSettingsPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Settings\AddinSettings.cs"
 $FileLinkWizardPolicyPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\UI\FileLinkWizardForm.Policy.cs"
+$AddinLifecyclePath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.Lifecycle.cs"
 
 $storage = Get-Content -Raw -Path $SettingsStoragePath
 $transaction = Get-Content -Raw -Path $SettingsTransactionPath
@@ -17,6 +18,7 @@ $workflow = Get-Content -Raw -Path $SettingsWorkflowPath
 $settingsForm = Get-Content -Raw -Path $SettingsFormPath
 $settings = Get-Content -Raw -Path $AddinSettingsPath
 $fileLinkWizardPolicy = Get-Content -Raw -Path $FileLinkWizardPolicyPath
+$addinLifecycle = Get-Content -Raw -Path $AddinLifecyclePath
 $failures = New-Object System.Collections.Generic.List[string]
 
 $savedKeys = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
@@ -119,6 +121,14 @@ else {
     if (-not ($validationMethod -match '_applyTransportSecurityFromSettings\s*\(\s*nextSettings\s*,')) {
         $failures.Add("Pre-save transport validation must evaluate the candidate settings directly.")
     }
+}
+
+if (-not ($addinLifecycle -match 'TryApplyTransportSecurityFromSettings\(\s*"startup"\s*,\s*false\s*\)')) {
+    $failures.Add("Add-in startup must apply the persisted transport-security settings.")
+}
+
+if (-not ($workflow -match '_applyTransportSecurityFromSettings\(\s*nextSettings\s*,\s*"settings_save_commit"')) {
+    $failures.Add("A successful settings save must apply the persisted transport-security settings.")
 }
 
 if (-not ($storage -match 'case\s+"SharingAttachmentLinkTarget"[\s\S]{0,500}?AttachmentLinkTargetPolicy\.TryParse[\s\S]{0,500}?\(AttachmentLinkTarget\?\)null')) {

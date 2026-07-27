@@ -242,6 +242,10 @@ namespace NcTalkOutlookAddIn.Utilities
 
     internal static class TransportSecurityConfigurator
     {
+        private const string EnableSystemDefaultTlsSwitch =
+            "Switch.System.Net.DontEnableSystemDefaultTlsVersions";
+        private const string EnableStrongCryptoSwitch =
+            "Switch.System.Net.DontEnableSchUseStrongCrypto";
         private const SecurityProtocolType Tls13Protocol = (SecurityProtocolType)12288;
 
         internal static SecurityProtocolType ApplyFromSettings(AddinSettings settings, string source)
@@ -254,6 +258,9 @@ namespace NcTalkOutlookAddIn.Utilities
 
         internal static SecurityProtocolType Apply(bool useSystemDefault, bool enableTls12, bool enableTls13, string source)
         {
+            AppContext.SetSwitch(EnableSystemDefaultTlsSwitch, false);
+            AppContext.SetSwitch(EnableStrongCryptoSwitch, false);
+
             SecurityProtocolType protocol = BuildProtocol(useSystemDefault, enableTls12, enableTls13);
             try
             {

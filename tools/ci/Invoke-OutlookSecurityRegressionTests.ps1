@@ -12,6 +12,7 @@ try {
     @'
 using System;
 using System.IO;
+using System.Net;
 using System.Reflection;
 using System.Text;
 using NcTalkOutlookAddIn.Models;
@@ -45,6 +46,18 @@ namespace NcTalkOutlookAddIn.Utilities
         internal static string UpdateChangelogAdded { get { return "Added"; } }
         internal static string UpdateChangelogChanged { get { return "Changed"; } }
         internal static string UpdateChangelogFixed { get { return "Fixed"; } }
+        internal static string ConnectionFailureCertificateSummary { get { return "certificate"; } }
+        internal static string ConnectionFailureCertificateGuidance { get { return "certificate guidance"; } }
+        internal static string ConnectionFailureDnsSummary { get { return "dns"; } }
+        internal static string ConnectionFailureDnsGuidance { get { return "dns guidance"; } }
+        internal static string ConnectionFailureProxySummary { get { return "proxy"; } }
+        internal static string ConnectionFailureProxyGuidance { get { return "proxy guidance"; } }
+        internal static string ConnectionFailureTimeoutSummary { get { return "timeout"; } }
+        internal static string ConnectionFailureTimeoutGuidance { get { return "timeout guidance"; } }
+        internal static string ConnectionFailureTlsSummary { get { return "tls"; } }
+        internal static string ConnectionFailureTlsGuidance { get { return "tls guidance"; } }
+        internal static string ConnectionFailureGenericSummary { get { return "generic"; } }
+        internal static string ConnectionFailureGenericGuidance { get { return "generic guidance"; } }
     }
 }
 
@@ -63,6 +76,9 @@ namespace NcTalkOutlookAddIn.Settings
         internal string UpdateChangelogText { get; set; }
         internal string UpdateLastNotifiedVersion { get; set; }
         internal string UpdateLastNotifiedDateUtc { get; set; }
+        internal bool TransportTlsUseSystemDefault { get; set; }
+        internal bool TransportTlsEnable12 { get; set; }
+        internal bool TransportTlsEnable13 { get; set; }
     }
 }
 
@@ -88,6 +104,7 @@ internal static class OutlookSecurityRegressionTests
         TestStructuredSecretRedaction();
         TestUpdateTargetPolicy();
         TestAtomicSettingsTransaction();
+        TestTransportSecurityConfigurator();
 
         if (failures > 0)
         {
@@ -247,6 +264,54 @@ internal static class OutlookSecurityRegressionTests
         }
     }
 
+    private static void TestTransportSecurityConfigurator()
+    {
+        SecurityProtocolType previous = ServicePointManager.SecurityProtocol;
+        try
+        {
+            var settings = new AddinSettings
+            {
+                TransportTlsUseSystemDefault = false,
+                TransportTlsEnable12 = true,
+                TransportTlsEnable13 = false
+            };
+            SecurityProtocolType applied =
+                TransportSecurityConfigurator.ApplyFromSettings(settings, "security_regression_test");
+
+            Check(
+                "TLS 1.2 setting changes the active runtime protocol",
+                applied == SecurityProtocolType.Tls12
+                    && ServicePointManager.SecurityProtocol == SecurityProtocolType.Tls12,
+                ServicePointManager.SecurityProtocol.ToString());
+
+            bool systemDefaultTlsDisabled;
+            bool strongCryptoDisabled;
+            Check(
+                "Runtime enables system-default TLS support",
+                AppContext.TryGetSwitch(
+                    "Switch.System.Net.DontEnableSystemDefaultTlsVersions",
+                    out systemDefaultTlsDisabled)
+                    && !systemDefaultTlsDisabled);
+            Check(
+                "Runtime enables strong cryptography support",
+                AppContext.TryGetSwitch(
+                    "Switch.System.Net.DontEnableSchUseStrongCrypto",
+                    out strongCryptoDisabled)
+                    && !strongCryptoDisabled);
+            Check(
+                "System-default TLS maps to the runtime default",
+                TransportSecurityConfigurator.BuildProtocol(true, false, false)
+                    == SecurityProtocolType.SystemDefault);
+            Check(
+                "TLS 1.3 selection keeps its runtime protocol flag",
+                (int)TransportSecurityConfigurator.BuildProtocol(false, false, true) == 12288);
+        }
+        finally
+        {
+            ServicePointManager.SecurityProtocol = previous;
+        }
+    }
+
     private static void Write(Stream stream, string content)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(content);
@@ -266,6 +331,7 @@ internal static class OutlookSecurityRegressionTests
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\UpdateCheckService.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Settings\SettingsFileTransaction.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\DiagnosticsLogger.cs"),
+        (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\HttpFailureDiagnostics.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\LogCategories.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\NcJson.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\NextcloudUriValidator.cs")
