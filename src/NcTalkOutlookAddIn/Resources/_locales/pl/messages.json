@@ -1385,11 +1385,8 @@
   "sharing_password_mail_notify_success": {
     "message": "E-mail z hasłem wysłany do odbiorców $1."
   },
-  "sharing_password_mail_prepare_failed": {
-    "message": "Nie udało się bezpiecznie zapisać wiadomości uzupełniającej z hasłem jako wersji roboczej. Wiadomość główna nie została wysłana."
-  },
   "sharing_password_secrets_fallback_warning": {
-    "message": "Nextcloud Secrets jest niedostępny. Hasło wysłano w osobnej wiadomości e-mail jako zwykły tekst."
+    "message": "Nextcloud Secrets jest niedostępny. Hasło zostanie zamiast tego przekazane w osobnej wiadomości e-mail jako zwykły tekst."
   },
   "sharing_password_mail_notify_title": {
     "message": "NC Connector"

@@ -195,7 +195,7 @@ Das App-Passwort wird als `AppPasswordProtected` mit dem Windows-Datenschutz fü
 
 Jeder erfolgreiche Speichervorgang schreibt zunächst eine validierte temporäre Datei im selben Verzeichnis und ersetzt danach die Hauptdatei. Die vorherige gültige Datei bleibt als `settings_<OutlookProfile>.xml.bak` erhalten. Ist nur das geschützte Passwort nicht lesbar, behält NC Connector die übrigen Einstellungen, leert das Passwort und blockiert automatische Settings-Schreibvorgänge, bis der Benutzer eine korrigierte Konfiguration ausdrücklich speichert.
 
-Ausstehende Talk-Raum-Löschungen und IFB-Registry-Besitzstände werden getrennt pro Outlook-Profil unter `%LOCALAPPDATA%\NC4OL\` gespeichert. Diese Zustandsdateien verwenden Windows Data Protection und behalten neben der Primärdatei eine Sicherung. Separate Passwort-Follow-ups sind vollständige Nachrichten im Outlook-Entwurfsordner; ihre private Payload-Eigenschaft ist für den aktuellen Windows-Benutzer geschützt. Geschützte Zustände nicht in ein anderes Windows-Konto kopieren und ausstehende NC-Connector-Passwortentwürfe nicht löschen.
+Ausstehende Talk-Raum-Löschungen und IFB-Registry-Besitzstände werden getrennt pro Outlook-Profil unter `%LOCALAPPDATA%\NC4OL\` gespeichert. Diese Zustandsdateien verwenden Windows Data Protection und behalten neben der Primärdatei eine Sicherung. Geschützte Zustände nicht in ein anderes Windows-Konto kopieren.
 
 Ältere `settings.ini`-Dateien unter diesen Verzeichnissen werden beim ersten Start migriert und erst nach erfolgreicher Migration entfernt:
 
@@ -210,7 +210,7 @@ So wird ein Client-Profil gesichert:
 
 1. Outlook schließen.
 2. `settings_*.xml` und `settings_*.xml.bak` aus `%LOCALAPPDATA%\NC4OL\` kopieren.
-3. Sollen ausstehende Talk-Raum-Löschungen die Sicherung überleben, zusätzlich `talk-room-lifecycle-*.dat*` und `ifb-registry-state-*.dat*` kopieren. Sie können nur für denselben Windows-Benutzer wiederhergestellt werden. Ausstehende Passwort-Follow-ups gehören zum Outlook-Postfach und werden nicht aus diesen Dateien wiederhergestellt.
+3. Sollen ausstehende Talk-Raum-Löschungen die Sicherung überleben, zusätzlich `talk-room-lifecycle-*.dat*` und `ifb-registry-state-*.dat*` kopieren. Sie können nur für denselben Windows-Benutzer wiederhergestellt werden.
 4. Windows-Benutzer und Outlook-Profilnamen dokumentieren.
 
 So wird es wiederhergestellt:
@@ -220,7 +220,7 @@ So wird es wiederhergestellt:
 3. Outlook starten und den Verbindungstest ausführen.
 4. Bei fehlgeschlagener Authentifizierung den Nextcloud-Login-Flow erneut verwenden.
 
-Logs und der IFB-Adressbuch-Cache sind Betriebsdaten und für die Wiederherstellung der Konfiguration nicht erforderlich. Ohne die Talk-Lifecycle-Dateien gehen ausstehende Wiederholungen von Talk-Raum-Löschungen verloren. Passwort-Follow-ups bleiben über ihre Outlook-Entwürfe erhalten, wenn das Postfach selbst erhalten bleibt.
+Logs und der IFB-Adressbuch-Cache sind Betriebsdaten und für die Wiederherstellung der Konfiguration nicht erforderlich. Ohne die Talk-Lifecycle-Dateien gehen ausstehende Wiederholungen von Talk-Raum-Löschungen verloren.
 
 ### Rollout und Vorbelegung
 
@@ -558,7 +558,7 @@ Nach dem Einfügen eines Freigabeblocks verfolgt NC Connector die neu erstellte 
 - Das spätere Löschen eines bereits von Outlook gespeicherten Entwurfs wird nicht verfolgt. Seine ungenutzte Freigabe muss manuell in Nextcloud entfernt werden.
 - Kann der Freigabeblock nicht eingefügt werden, meldet der Wizard einen Fehler und versucht sofort, den neu erzeugten Serverordner mit dem erfassten Kontokontext zu entfernen.
 - Eine erzwingende Anhangs-Policy blockiert den Versand, solange ein normaler Anhang in der Nachricht verbleibt, der über NC Connector hätte laufen müssen.
-- Die separate Passwortzustellung verwendet nach dem Klick auf **Senden** eigene gespeicherte Outlook-Entwürfe, wie im folgenden Abschnitt beschrieben.
+- Die separate Passwortzustellung wird beim Klick auf **Senden** direkt übergeben, wie im folgenden Abschnitt beschrieben.
 
 ### Separate Passwortzustellung
 
@@ -567,11 +567,9 @@ Separate Passwortzustellung benötigt NC Connector Backend und einen aktiven Sea
 - Die Hauptmail enthält kein Klartextpasswort.
 - Die separate Passwortzustellung ist an die geöffnete Verfassen-Sitzung gebunden, in der die Freigabe erstellt wurde. Der Benutzer muss in genau dieser weiterhin geöffneten Nachricht auf **Senden** klicken. Speichern und AutoSave unterbrechen den Ablauf nicht, solange das Verfassen-Fenster geöffnet bleibt.
 - Das Speichern der Hauptmail als Entwurf oder `.oft`-Vorlage mit anschließendem Schließen wird nicht unterstützt. Beim erneuten Öffnen des Entwurfs, einem Outlook-Neustart vor dem ersten Sendeversuch oder einer neuen Nachricht aus dieser Vorlage bleibt der sichtbare Freigabeblock erhalten, der Zustand für die Passwortzustellung jedoch nicht. Es wird keine Passwort-Follow-up-Mail erstellt; vor dem Versand muss in der endgültigen Nachricht eine neue Freigabe erstellt werden.
-- Bevor Outlook den Versand der Hauptmail annimmt, wird der vollständige Passwort-Follow-up als Outlook-Entwurf gespeichert. Kann dieser Entwurf nicht sicher gespeichert werden, wird der Versand der Hauptmail abgebrochen.
-- Die Follow-up-Mail startet erst, nachdem Outlook die Hauptmail eindeutig in dem für diese Nachricht ausgewählten exakten Gesendet-Ordner bestätigt hat.
-- Outlooks integrierte verzögerte Übermittlung („Später senden“) wird unterstützt, nachdem in der ursprünglichen Verfassen-Sitzung auf **Senden** geklickt wurde. Offline-Postausgang und ein Outlook-Neustart nach diesem Sendeversuch lassen den vorbereiteten Follow-up ausstehend, bis die Hauptmail im exakten Gesendet-Ordner erscheint.
-- Der automatische Versand wird mit demselben wirksamen Absender versucht.
-- Schlägt die Absenderprüfung oder der automatische Versand fehl, öffnet Outlook genau diesen vorbereiteten Entwurf zum manuellen Senden; es entsteht kein Duplikat.
+- Beim Klick auf **Senden** wird der Passwort-Follow-up vollständig aufgebaut und sofort über dasselbe wirksame Outlook-Konto übergeben. NC Connector speichert keinen zwischenzeitlichen Passwortentwurf und wertet weder Entwürfe, Postausgang noch Gesendet-Ordner aus.
+- Diese direkte Grenze wartet nicht auf eine verzögerte oder Offline-Übermittlung der Hauptmail. Der Passwort-Follow-up kann daher bereits übergeben sein, während die Hauptmail noch im Postausgang liegt oder nach dem NC-Connector-Send-Callback von Outlook abgelehnt wird.
+- Schlägt die Absenderprüfung oder automatische Übergabe eindeutig fehl, öffnet Outlook eine vollständig vorbereitete Nachricht zum manuellen Senden. Bei einem mehrdeutigen Outlook-Übermittlungsstatus wird kein automatisches Duplikat erzeugt.
 - Im Secrets-Modus wird für jeden endgültigen Empfänger ein eigener einmaliger Secret-Link erstellt.
 - Gleiche SMTP-Adressen in An, Cc und Bcc erhalten nur einen Secret-Follow-up.
 - Schlägt die Secrets-Erstellung fehl, verwendet Outlook die Klartext-Passwort-Follow-up-Mail und zeigt eine Warnung.

@@ -99,9 +99,9 @@ Key code locations:
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.cs` — compose subscription core state + lifecycle entry points (`Dispose`, identity, shared helpers)
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.AttachmentFlow.cs` — compose attachment interception/evaluation/share-launch flow
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Signature.cs` — backend email-signature policy application for the matching Outlook sender account
-- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Send.cs` — send gate and durable separate-password arming
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Send.cs` — send gate, final recipient/account capture, and direct separate-password dispatch
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.ShareCleanup.cs` — `AfterWrite`, `Inspector.Close`, and inline `Unload` handling for newly inserted shares
-- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.ComposeLifecycle.cs` — composition-root bridge for queued share cleanup and confirmed password dispatch
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.ComposeLifecycle.cs` — composition-root bridge for queued share cleanup and direct password dispatch
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.AppointmentSubscription.cs` — appointment runtime subscription lifecycle
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkAppointmentSync.cs` — STA capture and background dispatch for appointment changes
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkRoomLifecycle.cs` — startup, retry recovery, and teardown for queued Talk room deletions
@@ -111,7 +111,6 @@ Key code locations:
 - `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` with its `Sync` partial — appointment metadata, local snapshot capture, and remote room updates
 - `src/NcTalkOutlookAddIn/Controllers/ComposeShareCleanupTracker.cs` — in-memory pending-write state for newly inserted compose shares
 - `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` — exact-origin deletion of unpersisted or insertion-failed server artifacts, plus password-mail body, recipient, sender, Secrets, and signature preparation
-- `src/NcTalkOutlookAddIn/Controllers/PendingPasswordDraftController.cs` — saved Outlook password drafts, exact Sent-folder subscriptions, restart recovery, and automatic/manual follow-up dispatch
 - `src/NcTalkOutlookAddIn/Controllers/TalkDescriptionTemplateController.cs` — Talk template/body block rendering
 - `src/NcTalkOutlookAddIn/Controllers/OutlookRecipientResolverController.cs` — SMTP and attendee recipient resolution
 - `src/NcTalkOutlookAddIn/Controllers/MailComposeSubscriptionRegistryController.cs` — compose-subscription registry lifecycle
@@ -164,7 +163,7 @@ Runtime rules:
 - Signature processing only runs for unsent Outlook compose items. Opening a received or already sent message for reading must never modify its body.
 - Before send, the pending debounce is stopped and the current sender, format, compose kind, policy, and managed slot are reconciled synchronously. With complete backend connection settings, sending is cancelled if no successful policy snapshot is available or if a required apply/clear operation cannot finish safely. The compose item stays open for correction and retry.
 - An incomplete backend setup does not create a signature requirement; cleanup is limited to best-effort removal of an exact `NcConnectorSignature` bookmark. An unsupported signature domain disables insertion as well, but with otherwise complete backend settings an existing managed range must still reconcile safely at send time. An `InlineResponseClose` that arrives just before send does not by itself block a previously reconciled, unchanged message.
-- Separate password follow-up dispatch captures the successful policy and settings snapshot at share creation and stores the sanitized signature content with each durable draft. It applies and reads back `SendUsingAccount`/`SentOnBehalfOfName`, auto-sends only when the effective follow-up identity equals the sender captured from the primary mail's send attempt, and adds the backend signature only when that effective identity also matches `policy.email_signature.user_email`. Plain source mail produces a plain follow-up; HTML/RTF source produces an HTML follow-up. On automatic-send failure, Outlook displays that same prepared draft instead of creating a second message.
+- Separate password follow-up dispatch captures the successful policy and settings snapshot at share creation. On the primary mail's `Send` event it applies and reads back `SendUsingAccount`/`SentOnBehalfOfName`, submits only when the effective follow-up identity equals the captured primary sender, and adds the backend signature only when that identity also matches `policy.email_signature.user_email`. Plain source mail produces a plain follow-up; HTML/RTF source produces an HTML follow-up. A definite automatic-send failure displays the fully prepared message for manual delivery; an ambiguous submission is never repeated.
 - Debug logging records the trigger, active surface, body format, compose kind, slot source, and reconciliation result without writing the signature template or sender address.
 
 - **COM add-in lifecycle**
@@ -302,7 +301,7 @@ Compose runtime parity additions in `NextcloudTalkAddIn.cs` (`MailComposeSubscri
   - copies the effective attachment link target into `FileLinkRequest`; no per-share target switch is exposed.
 - Outlook body resources with `PR_ATTACHMENT_HIDDEN=true`, such as signature images, are excluded from attachment batching, threshold totals, FileLink selection, host removal, and the required-routing send gate.
 - `UI/FileLinkWizardForm.cs` file-step queue accepts Explorer drag & drop for files/folders across queue and action-area controls.
-- Compose insertion and pending-password lifecycle:
+- Compose insertion and separate-password lifecycle:
   - `ComposeLifecycleOrigin` retains the exact server/account origin needed to delete the created share or issue a later Secrets request. Cleanup never falls back to the currently selected account.
   - if a newly created share cannot be inserted into the message, the controller attempts to delete its server folder with that captured origin.
   - after successful insertion, `MailComposeSubscription` tracks its `ComposeShareCleanupRecord` until Outlook raises `AfterWrite`. A completed write covers Save, AutoSave, and the write performed for Send/Outbox, so those paths release the cleanup record without deleting the share.
@@ -311,8 +310,8 @@ Compose runtime parity additions in `NextcloudTalkAddIn.cs` (`MailComposeSubscri
   - DAV cleanup uses the shared bounded FileLink retry path. A repeated delete remains idempotent because an already absent folder is accepted.
   - cleanup tracking is held in memory. Once Outlook has written the message, deleting that saved draft later or after an Outlook restart does not delete the share; the unused share must be removed manually.
   - `RegisterSeparatePasswordDispatch` initially keeps the password follow-up data only in the subscription's `_passwordDispatchQueue`. Save and AutoSave do not serialize that queue into the primary mail. Closing the compose window disposes the subscription, so a reopened draft, an Outlook restart before the first send attempt, or a new message created from an `.oft` template cannot restore the follow-up state.
-  - before Outlook accepts a primary send with separate password delivery, `PendingPasswordDraftController` creates and saves the complete follow-up drafts, protects their payloads with Windows DPAPI, records the exact `SaveSentMessageFolder`, writes a unique attempt marker to the primary item, and then arms the drafts. A persistence failure cancels the primary send.
-  - `OnSend` is the persistence boundary. Outlook's built-in delayed delivery still passes through this event before the primary mail enters the Outbox. Only an `ItemAdd` event or restart scan that finds the marked primary item with `MailItem.Sent=true` in the exact folder confirms delivery, so delayed or offline Outbox delivery remains pending and survives an Outlook restart after the send attempt.
+  - `OnSend` is the direct dispatch boundary. The queue is consumed once, final Secrets/plain content is produced, the primary mail's resolved recipients and effective `SendUsingAccount`/`SentOnBehalfOfName` are applied, body and matching backend signature are finalized, recipients are resolved, and the follow-up is submitted without saving an intermediate Outlook draft.
+  - no Drafts, Outbox, Sent-folder, MIME-marker, or restart-recovery path participates in password delivery. Outlook delayed/offline delivery still invokes `OnSend`, so the password follow-up is submitted immediately and does not wait for the primary item to leave the Outbox. Unexpected follow-up failures never set the primary send's `cancel` flag.
   - the send gate also cancels an enforcing attachment policy while an ordinary attachment still violates it.
 - Separate password-mail dispatch:
   - queue password-only content after share creation and persist the origin settings needed by later Secrets requests
@@ -322,8 +321,9 @@ Compose runtime parity additions in `NextcloudTalkAddIn.cs` (`MailComposeSubscri
   - when backend policy requests Nextcloud Secrets, create one one-time Secrets link per unique final recipient
   - Secrets links are encrypted locally with AES-GCM through Windows CNG; no new crypto dependency is bundled
   - if Secrets creation fails, fall back to the existing plain separate password mail and warn the user
-  - dispatch the saved draft only after positive confirmation in its exact Sent folder and keep the source compose mode for HTML vs plain-text follow-up mails
-  - on automatic-send failure, display the same saved draft for manual delivery; do not create a duplicate.
+  - preserve the source compose mode for HTML vs plain-text follow-up mails and submit directly from the primary `Send` callback without calling `Save`
+  - on a definite automatic-send failure, open one fully prepared manual fallback; when Outlook's submission state is ambiguous, do not create or send a duplicate
+  - if strict sender or recipient preparation fails before submission, open a fresh manual fallback with normalized To/Cc/Bcc strings and reconcile the managed signature after the Inspector is initialized.
 
 #### IFB flow
 
@@ -518,7 +518,7 @@ Suggested smoke test sequence:
 5. Calendar: enable saved-event room deletion, then delete saved Talk appointments from an open appointment and from the calendar view. Verify that each associated room is removed. Repeat once with a temporary Nextcloud failure, restart Outlook, and verify the queued retry.
 6. Mail: run the sharing wizard, upload 1–2 small files, insert the HTML block, and send to yourself.
 7. Mail: insert a share and discard the message before it is saved; verify that the exact server folder is removed. Repeat with Save or AutoSave and verify that the share remains.
-8. Mail: with separate password delivery, create the share and click Send from the same compose window. Repeat with Outlook delayed delivery and restart Outlook while the primary mail remains in the Outbox; the prepared follow-up must stay pending until Sent Items confirmation. A closed and reopened primary draft or an `.oft` template with an existing share block is outside the supported flow and requires a new share before sending.
+8. Mail: with separate password delivery, create the share and click Send from the same compose window. Verify that the final follow-up leaves through the same effective Outlook account immediately and that no NC Connector password draft remains. Repeat with delayed/offline delivery and verify the documented direct boundary: the follow-up does not wait for the primary Outbox item. A closed and reopened primary draft or an `.oft` template with an existing share block is outside the supported flow and requires a new share before sending.
 9. IFB: enable IFB, verify the URL reservation and TCP listener, then use Outlook's Scheduling Assistant with an address whose domain differs from the configured Nextcloud login and host. A direct request without the profile secret is expected to return `404`.
 10. Settings -> Advanced: click `Check now` and verify that latest version, last check, download link, and changelog summary update without blocking Outlook.
 

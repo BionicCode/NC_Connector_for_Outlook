@@ -146,7 +146,6 @@
     <Compile Include="Controllers\MailComposeSubscriptionRegistryController.cs" />
     <Compile Include="Controllers\ComposeShareLifecycleController.cs" />
     <Compile Include="Controllers\ComposeShareCleanupTracker.cs" />
-    <Compile Include="Controllers\PendingPasswordDraftController.cs" />
     <Compile Include="Controllers\MailInteropController.cs" />
     <Compile Include="Controllers\OutlookWordEditorContext.cs" />
     <Compile Include="Services\FreeBusyManager.cs" />

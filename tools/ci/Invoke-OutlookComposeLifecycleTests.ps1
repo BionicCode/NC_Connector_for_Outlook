@@ -65,7 +65,6 @@ function Get-MethodSlice(
     return $Source.Substring($start, $end - $start)
 }
 
-$pendingPath = "src\NcTalkOutlookAddIn\Controllers\PendingPasswordDraftController.cs"
 $composePath = "src\NcTalkOutlookAddIn\Controllers\ComposeShareLifecycleController.cs"
 $trackerPath = "src\NcTalkOutlookAddIn\Controllers\ComposeShareCleanupTracker.cs"
 $sendPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.MailComposeSubscription.Send.cs"
@@ -76,7 +75,6 @@ $hooksPath = "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.Hooks.cs"
 $fileLinkPath = "src\NcTalkOutlookAddIn\Controllers\FileLinkLaunchController.cs"
 $projectPath = "src\NcTalkOutlookAddIn\NcTalkOutlookAddIn.csproj"
 
-$pending = Read-Source $pendingPath
 $compose = Read-Source $composePath
 $tracker = Read-Source $trackerPath
 $send = Read-Source $sendPath
@@ -86,6 +84,18 @@ $attachmentFlow = Read-Source $attachmentFlowPath
 $hooks = Read-Source $hooksPath
 $fileLink = Read-Source $fileLinkPath
 $project = Read-Source $projectPath
+$directPasswordDispatch = Get-MethodSlice `
+    $compose `
+    "internal void DispatchSeparatePasswordMailQueue(" `
+    "private List<string> PopulatePasswordMail("
+$passwordMailPopulation = Get-MethodSlice `
+    $compose `
+    "private List<string> PopulatePasswordMail(" `
+    "private bool TryOpenSeparatePasswordFallback("
+$manualPasswordFallback = Get-MethodSlice `
+    $compose `
+    "private bool TryOpenSeparatePasswordFallback(" `
+    "private static bool ReadSubmittedOrAmbiguous("
 
 $attachmentAdd = Get-MethodSlice `
     $attachmentFlow `
@@ -162,85 +172,113 @@ Assert-NotContains `
     $removeLastAttachmentBatch `
     "attachments.Remove(attachments.Count)"
 
-Assert-Contains `
-    "Primary send is cancelled when pending drafts cannot be persisted" `
+Assert-Precedes `
+    "Primary Send captures recipients before direct password dispatch" `
     $send `
-    "if (!_owner.TryArmPendingPasswordDrafts("
-Assert-Contains `
-    "Persistence failure sets Outlook cancel" `
+    "CapturePasswordDispatchRecipients();" `
+    "_owner.DispatchSeparatePasswordMails("
+Assert-Precedes `
+    "Primary Send captures the sender before direct password dispatch" `
     $send `
-    "cancel = true;"
-Assert-Contains `
-    "DeleteAfterSubmit is rejected because no positive copy can exist" `
-    $pending `
-    "primary.DeleteAfterSubmit"
-Assert-Contains `
-    "Primary item receives a unique attempt marker" `
-    $pending `
-    "WriteProperty(primary, AttemptProperty, attempt);"
-Assert-Contains `
-    "Password draft is saved before it becomes armed" `
-    $pending `
-    'WriteProperty(draft, StateProperty, "staging");'
-Assert-Contains `
-    "Pending payload is protected for the current Windows user" `
-    $pending `
-    "DataProtectionScope.CurrentUser"
-
-Assert-Contains `
-    "Actual SaveSentMessageFolder is captured" `
-    $pending `
-    "primary.SaveSentMessageFolder"
-Assert-Contains `
-    "Fallback Sent folder is assigned back to the primary item" `
-    $pending `
-    "primary.SaveSentMessageFolder = folder;"
-Assert-Contains `
-    "Recovery resolves the exact persisted Sent folder" `
-    $pending `
-    "session.GetFolderFromID("
-Assert-Contains `
-    "Exact Sent folder uses ItemAdd confirmation" `
-    $pending `
-    "items.ItemAdd += OnSentItemAdded;"
-Assert-Contains `
-    "Confirmation requires Outlook Sent=true" `
-    $pending `
-    "mail == null || !ReadSent(mail)"
-Assert-Contains `
-    "Confirmation also verifies the expected folder" `
-    $pending `
-    "IsExpectedFolder(attempt, mail)"
-
-$sendMethodStart = $compose.IndexOf(
-    "internal bool SendPasswordDraft(",
-    [StringComparison]::Ordinal)
-$sendMethodEnd = $compose.IndexOf(
-    "private static bool ReadSubmittedOrAmbiguous(",
-    $sendMethodStart,
-    [StringComparison]::Ordinal)
-Assert-True `
-    "Saved-draft send method is present" `
-    ($sendMethodStart -ge 0 -and $sendMethodEnd -gt $sendMethodStart)
-$sendMethod = $compose.Substring(
-    $sendMethodStart,
-    $sendMethodEnd - $sendMethodStart)
-Assert-Contains `
-    "Automatic delivery sends the saved draft" `
-    $sendMethod `
-    "((Outlook._MailItem)mail).Send();"
-Assert-Contains `
-    "Failure displays that same draft" `
-    $sendMethod `
-    "mail.Display(false);"
+    "CapturePasswordDispatchSender();" `
+    "_owner.DispatchSeparatePasswordMails("
+Assert-Precedes `
+    "The password queue is consumed before direct dispatch" `
+    $send `
+    "_passwordDispatchQueue.Clear();" `
+    "_owner.DispatchSeparatePasswordMails("
 Assert-NotContains `
-    "Failure path does not create a duplicate draft" `
-    $sendMethod `
-    "CreateItem("
+    "Primary Send no longer waits for Sent-folder confirmation" `
+    $send `
+    "TryArmPendingPasswordDrafts"
+Assert-NotContains `
+    "Primary Send does not cancel because password auto-send failed" `
+    $send `
+    "SharingPasswordMailPrepareFailed"
+
+Assert-Precedes `
+    "Final password dispatch is prepared before Outlook mail creation" `
+    $directPasswordDispatch `
+    "PrepareSeparatePasswordDispatch(" `
+    "_owner.OutlookApplication.CreateItem("
+Assert-Precedes `
+    "Final sender identity is applied before the password body" `
+    $passwordMailPopulation `
+    "ApplyAndVerifySeparatePasswordSender(" `
+    "ApplySeparatePasswordBody("
+Assert-Precedes `
+    "Password body is complete before backend signature insertion" `
+    $passwordMailPopulation `
+    "ApplySeparatePasswordBody(" `
+    "ApplySeparatePasswordBackendSignature("
+Assert-Precedes `
+    "Recipients are resolved after final body and signature assembly" `
+    $passwordMailPopulation `
+    "ApplySeparatePasswordBackendSignature(" `
+    "ApplySeparatePasswordRecipientsForSend("
+Assert-Precedes `
+    "Password mail is fully populated before direct Send" `
+    $directPasswordDispatch `
+    "PopulatePasswordMail(" `
+    "((Outlook._MailItem)passwordMail).Send();"
+Assert-NotContains `
+    "Direct password delivery does not persist an intermediate draft" `
+    $directPasswordDispatch `
+    ".Save();"
 Assert-Contains `
-    "Ambiguous Submitted state suppresses a duplicate fallback" `
-    ($compose.Replace("`r`n", "`n")) `
-    "catch`n            {`n                return true;"
+    "Automatic Send failure offers a fully prepared manual fallback" `
+    $directPasswordDispatch `
+    "TryOpenSeparatePasswordFallback("
+Assert-Contains `
+    "Ambiguous submission suppresses a duplicate manual send" `
+    $directPasswordDispatch `
+    "ReadSubmittedOrAmbiguous(passwordMail)"
+Assert-Contains `
+    "A definite Send and fallback failure is reported to the user" `
+    $directPasswordDispatch `
+    "ShowPasswordMailFailure(ex.Message);"
+Assert-Contains `
+    "Secrets fallback warning also covers a prepared manual fallback" `
+    $directPasswordDispatch `
+    "(sent > 0 || manual > 0)"
+Assert-Contains `
+    "Manual Send fallback displays the prepared mail" `
+    $manualPasswordFallback `
+    "fallback.Display(false);"
+Assert-Contains `
+    "Build fallback uses normalized To recipients without resolution" `
+    $manualPasswordFallback `
+    "fallback.To = toRecipients;"
+Assert-Contains `
+    "Build fallback uses normalized Cc recipients without resolution" `
+    $manualPasswordFallback `
+    "fallback.CC = ccRecipients;"
+Assert-Contains `
+    "Build fallback uses normalized Bcc recipients without resolution" `
+    $manualPasswordFallback `
+    "fallback.BCC = bccRecipients;"
+Assert-NotContains `
+    "Build fallback does not repeat automatic recipient resolution" `
+    $manualPasswordFallback `
+    "ApplySeparatePasswordRecipientsForSend("
+Assert-Precedes `
+    "Build fallback reconciles the managed signature after display" `
+    $manualPasswordFallback `
+    "fallback.Display(false);" `
+    "ApplySeparatePasswordBackendSignatureToDisplayedFallback("
+Assert-Contains `
+    "Unexpected password dispatch failures do not escape the primary Send callback" `
+    $send `
+    "The primary send continues."
+Assert-True `
+    "Pending Sent-folder controller is removed" `
+    (-not (Test-Path -LiteralPath (
+        Join-Path $ProjectRoot `
+            "src\NcTalkOutlookAddIn\Controllers\PendingPasswordDraftController.cs")))
+Assert-NotContains `
+    "Project no longer compiles the pending Sent-folder controller" `
+    $project `
+    "PendingPasswordDraftController.cs"
 
 $insertedIndex = $fileLink.IndexOf(
     "bool inserted =",
@@ -441,10 +479,6 @@ foreach ($relative in $removed) {
         $project `
         $relative
 }
-Assert-Contains `
-    "Project includes the focused pending-draft controller" `
-    $project `
-    'Controllers\PendingPasswordDraftController.cs'
 Assert-Contains `
     "Project includes the compact cleanup record" `
     $project `

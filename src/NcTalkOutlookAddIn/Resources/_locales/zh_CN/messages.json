@@ -1385,11 +1385,8 @@
   "sharing_password_mail_notify_success": {
     "message": "密码电子邮件已发送至$1 收件人。"
   },
-  "sharing_password_mail_prepare_failed": {
-    "message": "无法将后续密码邮件安全地保存为草稿。主邮件未发送。"
-  },
   "sharing_password_secrets_fallback_warning": {
-    "message": "Nextcloud Secrets 不可用。密码已作为单独的纯文本邮件发送。"
+    "message": "Nextcloud Secrets 不可用。密码将改为通过单独的纯文本邮件提供。"
   },
   "sharing_password_mail_notify_title": {
     "message": "NC Connector"

@@ -996,8 +996,7 @@ namespace NcTalkOutlookAddIn.Utilities
         internal static string SharingPasswordMailSubjectWithLabel { get { return Get("sharing_password_mail_subject_with_label", "Password for shared link: {0}"); } }
         internal static string SharingPasswordMailNotificationTitle { get { return Get("sharing_password_mail_notify_title", "NC Connector"); } }
         internal static string SharingPasswordMailNotificationSuccess { get { return Get("sharing_password_mail_notify_success", "Password email sent to {0} recipient(s)."); } }
-        internal static string SharingPasswordMailPrepareFailed { get { return Get("sharing_password_mail_prepare_failed", "The password follow-up could not be saved safely as a draft. The main message was not sent."); } }
-        internal static string SharingPasswordSecretsFallbackWarning { get { return Get("sharing_password_secrets_fallback_warning", "Nextcloud Secrets is not available. The password was sent as a separate plain-text email."); } }
+        internal static string SharingPasswordSecretsFallbackWarning { get { return Get("sharing_password_secrets_fallback_warning", "Nextcloud Secrets is not available. The password will instead be provided in a separate plain-text email."); } }
 
         // Generic dialog title
         internal static string DialogTitle { get { return Get("extName", "NC Connector for Outlook"); } }

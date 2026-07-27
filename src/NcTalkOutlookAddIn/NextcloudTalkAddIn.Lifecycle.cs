@@ -45,7 +45,6 @@ namespace NcTalkOutlookAddIn
                 _settingsStorage.DataDirectory,
                 outlookProfileName);
             _freeBusyManager.Initialize(_outlookApplication);
-            InitializeComposeLifecycle();
             InitializeTalkAppointmentSync(outlookProfileName);
             InitializeTalkRoomLifecycle(
                 _settingsStorage.DataDirectory,
@@ -271,7 +270,6 @@ namespace NcTalkOutlookAddIn
             UnhookApplication();
             UnhookInspector();
             UnhookMailComposeSubscriptions();
-            DisposeComposeLifecycle();
             DisposeTalkAppointmentSync();
             DisposeTalkAppointmentSubscriptions();
             DisposeTalkRoomLifecycle();

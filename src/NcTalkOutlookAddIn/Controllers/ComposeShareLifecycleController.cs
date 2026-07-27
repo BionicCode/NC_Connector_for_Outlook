@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
+using System.Windows.Forms;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Services;
 using NcTalkOutlookAddIn.Settings;
@@ -21,6 +22,7 @@ namespace NcTalkOutlookAddIn.Controllers
             "__NCC_SECRET_DELIVERY_VALUE__";
 
         private readonly NextcloudTalkAddIn _owner;
+        private readonly MailInteropController _passwordMailInteropController;
 
         private sealed class SeparatePasswordSignatureSnapshot
         {
@@ -38,6 +40,8 @@ namespace NcTalkOutlookAddIn.Controllers
         internal ComposeShareLifecycleController(NextcloudTalkAddIn owner)
         {
             _owner = owner;
+            _passwordMailInteropController =
+                new MailInteropController(owner);
         }
 
         internal bool TryDeleteComposeShareFolder(
@@ -126,107 +130,267 @@ namespace NcTalkOutlookAddIn.Controllers
             }
         }
 
-        internal List<SeparatePasswordDispatchEntry>
-            ExpandPasswordDispatchEntries(
-                List<SeparatePasswordDispatchEntry> queue)
+        internal void DispatchSeparatePasswordMailQueue(
+            string composeKey,
+            List<SeparatePasswordDispatchEntry> queue)
         {
-            return ExpandSeparatePasswordDispatchEntries(queue);
+            if (queue == null
+                || queue.Count == 0
+                || _owner.OutlookApplication == null)
+            {
+                return;
+            }
+
+            List<SeparatePasswordDispatchEntry> dispatches =
+                ExpandSeparatePasswordDispatchEntries(queue);
+            var sentRecipients = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+            int attempted = 0;
+            int sent = 0;
+            int manual = 0;
+            int secretsFallback = 0;
+
+            foreach (SeparatePasswordDispatchEntry queued in dispatches)
+            {
+                SeparatePasswordDispatchEntry dispatch = null;
+                Outlook.MailItem passwordMail = null;
+                List<string> resolvedRecipients = null;
+                try
+                {
+                    dispatch =
+                        PrepareSeparatePasswordDispatch(
+                            queued,
+                            composeKey,
+                            ref secretsFallback);
+                    if (!IsDispatchUsable(dispatch))
+                    {
+                        continue;
+                    }
+
+                    attempted++;
+                    passwordMail =
+                        _owner.OutlookApplication.CreateItem(
+                            Outlook.OlItemType.olMailItem)
+                        as Outlook.MailItem;
+                    if (passwordMail == null)
+                    {
+                        throw new InvalidOperationException(
+                            "Password mail could not be created.");
+                    }
+                    resolvedRecipients = PopulatePasswordMail(
+                        passwordMail,
+                        dispatch,
+                        composeKey,
+                        true);
+
+                    NextcloudTalkAddIn.LogFileLinkMessage(
+                        "Separate password mail direct send start (composeKey="
+                        + (composeKey ?? string.Empty)
+                        + ", recipients="
+                        + resolvedRecipients.Count.ToString(
+                            CultureInfo.InvariantCulture)
+                        + ").");
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticsLogger.LogException(
+                        LogCategories.FileLink,
+                        "Separate password mail build failed (composeKey="
+                        + (composeKey ?? string.Empty)
+                        + ").",
+                        ex);
+                    if (TryOpenSeparatePasswordFallback(
+                            dispatch,
+                            composeKey))
+                    {
+                        manual++;
+                    }
+                    else
+                    {
+                        ShowPasswordMailFailure(ex.Message);
+                    }
+                    ComInteropScope.TryRelease(
+                        passwordMail,
+                        LogCategories.FileLink,
+                        "Failed to release incomplete password MailItem COM object.");
+                    continue;
+                }
+
+                try
+                {
+                    ((Outlook._MailItem)passwordMail).Send();
+                    sent++;
+                    foreach (string recipient
+                        in resolvedRecipients)
+                    {
+                        sentRecipients.Add(recipient);
+                    }
+                    NextcloudTalkAddIn.LogFileLinkMessage(
+                        "Separate password mail direct send accepted (composeKey="
+                        + (composeKey ?? string.Empty)
+                        + ").");
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticsLogger.LogException(
+                        LogCategories.FileLink,
+                        "Separate password mail direct send failed (composeKey="
+                        + (composeKey ?? string.Empty)
+                        + ").",
+                        ex);
+                    bool submittedOrAmbiguous =
+                        ReadSubmittedOrAmbiguous(passwordMail);
+                    if (!submittedOrAmbiguous
+                        && TryOpenSeparatePasswordFallback(
+                            dispatch,
+                            composeKey))
+                    {
+                        manual++;
+                    }
+                    else if (!submittedOrAmbiguous)
+                    {
+                        ShowPasswordMailFailure(ex.Message);
+                    }
+                }
+                finally
+                {
+                    ComInteropScope.TryRelease(
+                        passwordMail,
+                        LogCategories.FileLink,
+                        "Failed to release password MailItem COM object.");
+                }
+            }
+
+            if (secretsFallback > 0
+                && (sent > 0 || manual > 0))
+            {
+                ShowSecretsFallbackWarning();
+            }
+            if (attempted > 0 && sent == attempted)
+            {
+                _owner.ShowPasswordMailSuccessNotification(
+                    sentRecipients.Count);
+            }
+            NextcloudTalkAddIn.LogFileLinkMessage(
+                "Separate password direct dispatch completed (composeKey="
+                + (composeKey ?? string.Empty)
+                + ", attempted="
+                + attempted.ToString(CultureInfo.InvariantCulture)
+                + ", sent="
+                + sent.ToString(CultureInfo.InvariantCulture)
+                + ", manual="
+                + manual.ToString(CultureInfo.InvariantCulture)
+                + ").");
         }
 
-        internal void PreparePasswordDraft(
+        private List<string> PopulatePasswordMail(
             Outlook.MailItem mail,
-            SeparatePasswordDispatchEntry entry,
-            string composeKey)
+            SeparatePasswordDispatchEntry dispatch,
+            string composeKey,
+            bool requireSourceIdentity)
         {
-            if (mail == null || !IsDispatchUsable(entry))
+            if (mail == null || !IsDispatchUsable(dispatch))
             {
                 throw new InvalidOperationException(
-                    "Password mail draft is incomplete.");
+                    "Password mail is incomplete.");
             }
-            mail.Subject = BuildSeparatePasswordMailSubject(entry);
-            string sender = ApplyAndVerifySeparatePasswordSender(
-                mail,
-                entry,
-                composeKey,
-                false);
-            ApplySeparatePasswordBody(mail, entry);
+            mail.Subject =
+                BuildSeparatePasswordMailSubject(dispatch);
+            string effectiveSender =
+                ApplyAndVerifySeparatePasswordSender(
+                    mail,
+                    dispatch,
+                    composeKey,
+                    requireSourceIdentity);
+            ApplySeparatePasswordBody(mail, dispatch);
             ApplySeparatePasswordBackendSignature(
                 mail,
-                entry,
-                sender,
-                CapturedSignature(entry),
+                dispatch,
+                effectiveSender,
+                CapturedSignature(dispatch),
                 composeKey);
-            ApplySeparatePasswordRecipientsForSend(
+            return ApplySeparatePasswordRecipientsForSend(
                 mail,
-                entry,
+                dispatch,
                 composeKey);
         }
 
-        internal bool SendPasswordDraft(
-            Outlook.MailItem mail,
-            SeparatePasswordDispatchEntry entry,
-            string composeKey,
-            out bool submitted,
-            out bool manualFallback,
-            out int recipientCount)
+        private bool TryOpenSeparatePasswordFallback(
+            SeparatePasswordDispatchEntry dispatch,
+            string composeKey)
         {
-            submitted = false;
-            manualFallback = false;
-            recipientCount = 0;
-            int secretsFallbackCount = 0;
-            SeparatePasswordDispatchEntry prepared =
-                PrepareSeparatePasswordDispatch(
-                    entry,
-                    composeKey,
-                    ref secretsFallbackCount);
+            if (!IsDispatchUsable(dispatch)
+                || _owner.OutlookApplication == null)
+            {
+                return false;
+            }
+
+            Outlook.MailItem fallback = null;
             try
             {
-                string sender = ApplyAndVerifySeparatePasswordSender(
-                    mail,
-                    prepared,
+                fallback =
+                    _owner.OutlookApplication.CreateItem(
+                        Outlook.OlItemType.olMailItem)
+                    as Outlook.MailItem;
+                if (fallback == null)
+                {
+                    return false;
+                }
+                string toRecipients =
+                    BuildNormalizedRecipientCsv(dispatch.To);
+                string ccRecipients =
+                    BuildNormalizedRecipientCsv(dispatch.Cc);
+                string bccRecipients =
+                    BuildNormalizedRecipientCsv(dispatch.Bcc);
+                if (CountRecipientsInCsv(toRecipients)
+                    + CountRecipientsInCsv(ccRecipients)
+                    + CountRecipientsInCsv(bccRecipients) <= 0)
+                {
+                    throw new InvalidOperationException(
+                        "Separate password fallback mail has no valid recipients.");
+                }
+
+                fallback.To = toRecipients;
+                fallback.CC = ccRecipients;
+                fallback.BCC = bccRecipients;
+                fallback.Subject =
+                    BuildSeparatePasswordMailSubject(dispatch);
+                ApplyAndVerifySeparatePasswordSender(
+                    fallback,
+                    dispatch,
                     composeKey,
-                    true);
-                ApplySeparatePasswordBody(mail, prepared);
-                ApplySeparatePasswordBackendSignature(
-                    mail,
-                    prepared,
-                    sender,
-                    CapturedSignature(prepared),
+                    false);
+                ApplySeparatePasswordBody(
+                    fallback,
+                    dispatch);
+                fallback.Display(false);
+                ApplySeparatePasswordBackendSignatureToDisplayedFallback(
+                    fallback,
+                    dispatch,
+                    CapturedSignature(dispatch),
                     composeKey);
-                recipientCount =
-                    CountRecipientsInCsv(prepared.To)
-                    + CountRecipientsInCsv(prepared.Cc)
-                    + CountRecipientsInCsv(prepared.Bcc);
-                mail.Save();
-                ((Outlook._MailItem)mail).Send();
-                submitted = true;
+                NextcloudTalkAddIn.LogFileLinkMessage(
+                    "Separate password mail manual fallback opened (composeKey="
+                    + (composeKey ?? string.Empty)
+                    + ").");
                 return true;
             }
             catch (Exception ex)
             {
                 DiagnosticsLogger.LogException(
                     LogCategories.FileLink,
-                    "Separate password draft send failed (composeKey="
+                    "Separate password mail manual fallback failed (composeKey="
                     + (composeKey ?? string.Empty)
                     + ").",
                     ex);
-                submitted = ReadSubmittedOrAmbiguous(mail);
-                if (!submitted)
-                {
-                    try
-                    {
-                        mail.Display(false);
-                        manualFallback = true;
-                    }
-                    catch (Exception displayException)
-                    {
-                        DiagnosticsLogger.LogException(
-                            LogCategories.FileLink,
-                            "Failed to display the same password draft.",
-                            displayException);
-                    }
-                }
                 return false;
+            }
+            finally
+            {
+                ComInteropScope.TryRelease(
+                    fallback,
+                    LogCategories.FileLink,
+                    "Failed to release password fallback MailItem COM object.");
             }
         }
 
@@ -240,6 +404,44 @@ namespace NcTalkOutlookAddIn.Controllers
             catch
             {
                 return true;
+            }
+        }
+
+        private static void ShowPasswordMailFailure(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+            try
+            {
+                MessageBox.Show(
+                    message.Trim(),
+                    Strings.DialogTitle,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+            catch
+            {
+                // The primary Outlook send must not fail because a warning
+                // cannot be displayed.
+            }
+        }
+
+        private static void ShowSecretsFallbackWarning()
+        {
+            try
+            {
+                MessageBox.Show(
+                    Strings.SharingPasswordSecretsFallbackWarning,
+                    Strings.DialogTitle,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+            catch
+            {
+                // The primary Outlook send must not fail because a warning
+                // cannot be displayed.
             }
         }
 
@@ -1055,6 +1257,85 @@ namespace NcTalkOutlookAddIn.Controllers
                 + ", plainText="
                 + dispatch.IsPlainText.ToString(CultureInfo.InvariantCulture)
                 + ").");
+        }
+
+        private void
+            ApplySeparatePasswordBackendSignatureToDisplayedFallback(
+                Outlook.MailItem mail,
+                SeparatePasswordDispatchEntry dispatch,
+                SeparatePasswordSignatureSnapshot signatureSnapshot,
+                string composeKey)
+        {
+            if (mail == null
+                || dispatch == null
+                || signatureSnapshot == null
+                || !signatureSnapshot.Active)
+            {
+                return;
+            }
+
+            string effectiveSenderEmail =
+                ResolveSeparatePasswordEffectiveSenderEmail(
+                    mail,
+                    composeKey);
+            if (!string.Equals(
+                    effectiveSenderEmail,
+                    signatureSnapshot.UserEmail,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                LogSeparatePasswordSignatureSkipped(
+                    composeKey,
+                    "fallback_effective_identity_mismatch");
+                return;
+            }
+
+            string signatureContent = dispatch.IsPlainText
+                ? signatureSnapshot.PlainText
+                : EmailSignatureContentBuilder.BuildManagedHtml(
+                    signatureSnapshot.Html);
+            if (string.IsNullOrWhiteSpace(signatureContent))
+            {
+                LogSeparatePasswordSignatureSkipped(
+                    composeKey,
+                    dispatch.IsPlainText
+                        ? "fallback_plain_text_empty"
+                        : "fallback_html_empty");
+                return;
+            }
+
+            try
+            {
+                MailInteropController.EmailSignatureReconcileResult result =
+                    _passwordMailInteropController
+                        .ApplyManagedEmailSignature(
+                            mail,
+                            false,
+                            dispatch.IsPlainText,
+                            signatureContent,
+                            false,
+                            composeKey,
+                            "separate_password_fallback");
+                NextcloudTalkAddIn.LogFileLinkMessage(
+                    "Separate password fallback signature reconciled after display (composeKey="
+                    + (composeKey ?? string.Empty)
+                    + ", success="
+                    + (result != null && result.Success)
+                        .ToString(CultureInfo.InvariantCulture)
+                    + ", source="
+                    + (result != null
+                        ? (result.Source ?? "n/a")
+                        : "missing")
+                    + ").");
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLogger.LogException(
+                    LogCategories.FileLink,
+                    "Separate password fallback signature reconciliation failed (composeKey="
+                    + (composeKey ?? string.Empty)
+                    + ").",
+                    ex);
+            }
         }
 
         private static string NormalizeSmtpAddress(string value)

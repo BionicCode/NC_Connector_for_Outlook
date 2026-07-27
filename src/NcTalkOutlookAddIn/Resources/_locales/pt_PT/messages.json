@@ -1385,11 +1385,8 @@
   "sharing_password_mail_notify_success": {
     "message": "E-mail de palavra-passe enviado para $1 destinatário(s)."
   },
-  "sharing_password_mail_prepare_failed": {
-    "message": "Não foi possível guardar com segurança como rascunho o e-mail de seguimento com a palavra-passe. A mensagem principal não foi enviada."
-  },
   "sharing_password_secrets_fallback_warning": {
-    "message": "O Nextcloud Secrets não está disponível. A palavra-passe foi enviada num e-mail separado em texto simples."
+    "message": "O Nextcloud Secrets não está disponível. A palavra-passe será disponibilizada num e-mail separado em texto simples."
   },
   "sharing_password_mail_notify_title": {
     "message": "NC Connector"

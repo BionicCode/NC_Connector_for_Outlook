@@ -1385,11 +1385,8 @@
   "sharing_password_mail_notify_success": {
     "message": "パスワード電子メールが $1 受信者に送信されました。"
   },
-  "sharing_password_mail_prepare_failed": {
-    "message": "パスワードのフォローアップメールを下書きとして安全に保存できませんでした。メインメッセージは送信されませんでした。"
-  },
   "sharing_password_secrets_fallback_warning": {
-    "message": "Nextcloud Secrets を利用できません。パスワードは別のプレーンテキストメールで送信されました。"
+    "message": "Nextcloud Secrets を利用できません。パスワードは代わりに別のプレーンテキストメールで提供されます。"
   },
   "sharing_password_mail_notify_title": {
     "message": "NC Connector"

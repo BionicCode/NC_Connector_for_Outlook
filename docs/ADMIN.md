@@ -195,7 +195,7 @@ The app password is stored as `AppPasswordProtected` with Windows Data Protectio
 
 Every successful settings save is written to a validated temporary file in the same directory and then replaces the primary file. The previous valid file remains as `settings_<OutlookProfile>.xml.bak`. If only the protected password is unreadable, NC Connector keeps the other settings, clears the password, and blocks automatic settings writes until the user explicitly saves a corrected configuration.
 
-Pending Talk room deletions and IFB registry ownership are stored separately per Outlook profile below `%LOCALAPPDATA%\NC4OL\`. These state files use Windows Data Protection and keep a backup next to the primary file. Separate password follow-ups are complete messages saved in the user's Outlook Drafts folder; their private payload property is protected for the current Windows user. Do not copy protected state to another Windows account, and do not delete pending NC Connector password drafts.
+Pending Talk room deletions and IFB registry ownership are stored separately per Outlook profile below `%LOCALAPPDATA%\NC4OL\`. These state files use Windows Data Protection and keep a backup next to the primary file. Do not copy protected state to another Windows account.
 
 Older `settings.ini` files below these directories are migrated on first start and removed only after a successful migration:
 
@@ -210,7 +210,7 @@ To back up a client profile:
 
 1. Close Outlook.
 2. Copy `settings_*.xml` and `settings_*.xml.bak` from `%LOCALAPPDATA%\NC4OL\`.
-3. If pending Talk room deletions must survive the backup, copy `talk-room-lifecycle-*.dat*` and `ifb-registry-state-*.dat*` too. They can be restored only for the same Windows user. Pending password follow-ups are part of the Outlook mailbox and are not restored from these files.
+3. If pending Talk room deletions must survive the backup, copy `talk-room-lifecycle-*.dat*` and `ifb-registry-state-*.dat*` too. They can be restored only for the same Windows user.
 4. Record the Windows user and Outlook profile name.
 
 To restore it:
@@ -220,7 +220,7 @@ To restore it:
 3. Start Outlook and run the connection test.
 4. If authentication fails, use the Nextcloud login flow again.
 
-Logs and the IFB address-book cache are operating data, not required for configuration recovery. Omitting the Talk lifecycle files abandons pending Talk-room deletion retries. Password follow-ups survive through their Outlook drafts when the mailbox itself is retained.
+Logs and the IFB address-book cache are operating data, not required for configuration recovery. Omitting the Talk lifecycle files abandons pending Talk-room deletion retries.
 
 ### Rollout and pre-seeding
 
@@ -558,7 +558,7 @@ After a share block is inserted, NC Connector tracks the newly created server sh
 - Deleting a draft that Outlook has already saved is not tracked. Remove its unused share manually in Nextcloud.
 - If the share block cannot be inserted, the wizard reports failure and immediately attempts to remove the newly created server folder with the captured account context.
 - An enforcing attachment policy blocks sending while a normal attachment that should have been routed through NC Connector remains in the message.
-- Separate password delivery uses its own saved Outlook drafts after the user clicks **Send**, as described below.
+- Separate password delivery is submitted directly when the user clicks **Send**, as described below.
 
 ### Separate password delivery
 
@@ -567,11 +567,9 @@ Separate password delivery requires NC Connector Backend and an active seat.
 - The primary mail contains no plain password.
 - Separate password delivery is tied to the open compose session in which the share was created. The user must click **Send** from that same, still-open message. Saving or AutoSave does not interrupt the flow while the compose window remains open.
 - Saving the primary mail as a draft or `.oft` template and then closing it is not supported. Reopening that draft, restarting Outlook before the first send attempt, or creating a message from that template restores the visible share block, but not the password follow-up state. No password follow-up is created; create a new share in the final message before sending it.
-- Before Outlook accepts the primary send, the complete password follow-up is saved as an Outlook draft. If that draft cannot be saved safely, the primary send is cancelled.
-- The follow-up starts only after Outlook positively confirms the primary mail in the exact Sent folder selected for that message.
-- Outlook's built-in delayed delivery is supported after **Send** has been clicked in the original compose session. Offline Outbox items and an Outlook restart after that send attempt keep the prepared follow-up pending until the primary mail appears in the exact Sent folder.
-- Automatic sending is attempted with the same effective sender.
-- If sender verification or automatic sending fails, Outlook opens that same prepared draft for manual sending; it does not create a duplicate.
+- Clicking **Send** finalizes and immediately submits the password follow-up with the primary mail's effective Outlook account. NC Connector does not save an intermediate password draft or inspect Drafts, Outbox, or Sent folders.
+- This direct boundary does not wait for delayed or offline primary delivery. The password follow-up can therefore be submitted while the primary mail is still in the Outbox or if Outlook rejects it after NC Connector's send callback.
+- If sender verification or automatic submission definitely fails, Outlook opens a fully prepared message for manual sending. An ambiguous Outlook submission is not repeated automatically.
 - With the Secrets mode, one one-time Secret link is created per final recipient.
 - Equal SMTP addresses across To, Cc, and Bcc receive only one Secret follow-up.
 - If Secrets creation fails, Outlook uses the plain password follow-up and displays a warning.

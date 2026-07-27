@@ -1385,11 +1385,8 @@
   "sharing_password_mail_notify_success": {
     "message": "E-mail s heslem byl odeslán $1 příjemcům."
   },
-  "sharing_password_mail_prepare_failed": {
-    "message": "Následný e-mail s heslem se nepodařilo bezpečně uložit jako koncept. Hlavní zpráva nebyla odeslána."
-  },
   "sharing_password_secrets_fallback_warning": {
-    "message": "Nextcloud Secrets není k dispozici. Heslo bylo odesláno v samostatném e-mailu jako prostý text."
+    "message": "Nextcloud Secrets není k dispozici. Heslo bude místo toho poskytnuto v samostatném e-mailu jako prostý text."
   },
   "sharing_password_mail_notify_title": {
     "message": "NC Connector"

@@ -1406,11 +1406,8 @@
   "sharing_password_mail_notify_success": {
     "message": "Password email sent to $1 recipient(s)."
   },
-  "sharing_password_mail_prepare_failed": {
-    "message": "The password follow-up could not be saved safely as a draft. The main message was not sent."
-  },
   "sharing_password_secrets_fallback_warning": {
-    "message": "Nextcloud Secrets is not available. The password was sent as a separate plain-text email."
+    "message": "Nextcloud Secrets is not available. The password will instead be provided in a separate plain-text email."
   },
   "sharing_password_mail_notify_title": {
     "message": "NC Connector"

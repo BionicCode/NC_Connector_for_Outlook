@@ -5,8 +5,8 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Windows.Forms;
 using NcTalkOutlookAddIn.Controllers;
+using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Services;
 using NcTalkOutlookAddIn.Utilities;
 using Outlook = Microsoft.Office.Interop.Outlook;
@@ -33,28 +33,44 @@ namespace NcTalkOutlookAddIn
                 CapturePasswordDispatchRecipients();
                 CapturePasswordDispatchSender();
 
-                if (_passwordDispatchQueue.Count > 0)
+                int passwordDispatchCount =
+                    _passwordDispatchQueue.Count;
+                if (passwordDispatchCount > 0)
                 {
-                    if (!_owner.TryArmPendingPasswordDrafts(
-                        _mail,
-                        _composeKey,
-                        _passwordDispatchQueue))
+                    var queue =
+                        new List<SeparatePasswordDispatchEntry>(
+                            _passwordDispatchQueue);
+                    _passwordDispatchQueue.Clear();
+                    LogFileLink(
+                        "Separate password direct dispatch triggered by primary send (composeKey="
+                        + _composeKey
+                        + ", queued="
+                        + queue.Count.ToString(
+                            CultureInfo.InvariantCulture)
+                        + ").");
+                    try
                     {
-                        cancel = true;
-                        MessageBox.Show(
-                            Strings.SharingPasswordMailPrepareFailed,
-                            Strings.DialogTitle,
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Warning);
-                        return;
+                        _owner.DispatchSeparatePasswordMails(
+                            _composeKey,
+                            queue);
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticsLogger.LogException(
+                            LogCategories.FileLink,
+                            "Separate password direct dispatch failed unexpectedly (composeKey="
+                            + _composeKey
+                            + "). The primary send continues.",
+                            ex);
                     }
                 }
 
                 LogFileLink(
-                    "Compose send armed for positive Sent confirmation (composeKey="
+                    "Compose send handling completed (composeKey="
                     + _composeKey
-                    + ", passwordQueued="
-                    + _passwordDispatchQueue.Count.ToString(CultureInfo.InvariantCulture)
+                    + ", passwordDispatched="
+                    + passwordDispatchCount.ToString(
+                        CultureInfo.InvariantCulture)
                     + ").");
             }
 

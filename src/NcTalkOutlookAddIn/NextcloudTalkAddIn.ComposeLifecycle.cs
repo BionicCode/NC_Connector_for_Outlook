@@ -4,7 +4,6 @@
 
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using NcTalkOutlookAddIn.Controllers;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Settings;
 using Outlook = Microsoft.Office.Interop.Outlook;
@@ -13,43 +12,14 @@ namespace NcTalkOutlookAddIn
 {
     public sealed partial class NextcloudTalkAddIn
     {
-        private PendingPasswordDraftController
-            _pendingPasswordDraftController;
-
-        private void InitializeComposeLifecycle()
-        {
-            DisposeComposeLifecycle();
-            _pendingPasswordDraftController =
-                new PendingPasswordDraftController(
-                    this,
-                    _composeShareLifecycleController);
-            _pendingPasswordDraftController.Start();
-        }
-
-        private void DisposeComposeLifecycle()
-        {
-            PendingPasswordDraftController controller =
-                _pendingPasswordDraftController;
-            _pendingPasswordDraftController = null;
-            if (controller != null)
-            {
-                controller.Dispose();
-            }
-        }
-
-        internal bool TryArmPendingPasswordDrafts(
-            Outlook.MailItem primary,
+        internal void DispatchSeparatePasswordMails(
             string composeKey,
             List<SeparatePasswordDispatchEntry> queue)
         {
-            if (_pendingPasswordDraftController == null)
-            {
-                return false;
-            }
-            return _pendingPasswordDraftController.TryArm(
-                primary,
-                composeKey,
-                queue);
+            _composeShareLifecycleController
+                .DispatchSeparatePasswordMailQueue(
+                    composeKey,
+                    queue);
         }
 
         internal void QueueCreatedShareCleanup(
