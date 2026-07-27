@@ -116,21 +116,13 @@ namespace NcTalkOutlookAddIn.Services
             AddinSettings settings,
             string requestSecret)
         {
-            string domain = GuessDefaultDomain(settings);
             int ifbPort =
                 AddinSettings.NormalizeIfbPort(settings.IfbPort);
-            var builder = new StringBuilder(
-                "http://127.0.0.1:"
-                + ifbPort.ToString(CultureInfo.InvariantCulture)
-                + "/nc-ifb/"
-                + (requestSecret ?? string.Empty).Trim()
-                + "/freebusy/%NAME%");
-            if (!string.IsNullOrEmpty(domain))
-            {
-                builder.Append("@").Append(domain);
-            }
-            builder.Append(".vfb");
-            return builder.ToString();
+            return "http://127.0.0.1:"
+                   + ifbPort.ToString(CultureInfo.InvariantCulture)
+                   + "/nc-ifb/"
+                   + (requestSecret ?? string.Empty).Trim()
+                   + "/freebusy/%NAME%@%SERVER%.vfb";
         }
 
         internal static string CreateRequestSecret()
@@ -182,42 +174,6 @@ namespace NcTalkOutlookAddIn.Services
                     ex);
             }
             return "16.0";
-        }
-
-        private static string GuessDefaultDomain(
-            AddinSettings settings)
-        {
-            if (!string.IsNullOrWhiteSpace(settings.Username)
-                && settings.Username.Contains("@"))
-            {
-                string[] parts = settings.Username.Split('@');
-                if (parts.Length == 2
-                    && !string.IsNullOrWhiteSpace(parts[1]))
-                {
-                    return parts[1].Trim();
-                }
-            }
-            try
-            {
-                var uri = new Uri(settings.ServerUrl);
-                string host = uri.Host ?? string.Empty;
-                string[] segments = host.Split('.');
-                if (segments.Length >= 2)
-                {
-                    return segments[segments.Length - 2]
-                           + "."
-                           + segments[segments.Length - 1];
-                }
-                return host;
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLogger.LogException(
-                    LogCategories.Ifb,
-                    "Failed to derive IFB default domain from server URL.",
-                    ex);
-                return string.Empty;
-            }
         }
 
         private static string BuildIfbStartFailureMessage(

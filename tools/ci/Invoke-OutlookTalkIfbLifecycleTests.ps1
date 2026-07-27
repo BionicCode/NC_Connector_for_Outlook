@@ -40,6 +40,7 @@ $appointmentController = Join-Path $SourceRoot "Controllers\TalkAppointmentContr
 $appointmentSyncController = Join-Path $SourceRoot "Controllers\TalkAppointmentController.Sync.cs"
 $appointmentSubscription = Join-Path $SourceRoot "NextcloudTalkAddIn.AppointmentSubscription.cs"
 $appointmentSync = Join-Path $SourceRoot "NextcloudTalkAddIn.TalkAppointmentSync.cs"
+$ifbManager = Join-Path $SourceRoot "Services\FreeBusyManager.cs"
 $ifbServer = Join-Path $SourceRoot "Services\FreeBusyServer.cs"
 $ifbCache = Join-Path $SourceRoot "Services\IfbAddressBookCache.cs"
 $ifbOwnership = Join-Path $SourceRoot "Services\IfbRegistryOwnershipManager.cs"
@@ -82,6 +83,22 @@ Assert-SourceContract `
     "IFB server does not log raw authenticated request URLs" `
     $ifbServer `
     'TryParseAuthorizedEmailPath'
+Assert-SourceContract `
+    "Outlook IFB URL keeps the attendee domain placeholder" `
+    $ifbManager `
+    '/freebusy/%NAME%@%SERVER%\.vfb'
+Assert-SourceAbsent `
+    "Outlook IFB URL does not guess a domain from connector settings" `
+    $ifbManager `
+    'GuessDefaultDomain'
+Assert-SourceAbsent `
+    "IFB address lookup has no local-part fallback" `
+    $ifbCache `
+    'TryResolveEmail|_localPartToEmail'
+Assert-SourceContract `
+    "IFB server looks up the complete attendee address" `
+    $ifbServer `
+    'TryGetUid\(\s*_configuration,\s*_cacheHours,\s*email'
 Assert-SourceContract `
     "IFB server limits concurrent requests directly" `
     $ifbServer `

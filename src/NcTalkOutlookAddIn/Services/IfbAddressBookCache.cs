@@ -29,9 +29,6 @@ namespace NcTalkOutlookAddIn.Services
         private Dictionary<string, string> _uidToEmail =
             new Dictionary<string, string>(
                 StringComparer.OrdinalIgnoreCase);
-        private Dictionary<string, string> _localPartToEmail =
-            new Dictionary<string, string>(
-                StringComparer.OrdinalIgnoreCase);
         private DateTime _generatedUtc = DateTime.MinValue;
         private string _activeScopeFingerprint = string.Empty;
 
@@ -179,43 +176,6 @@ namespace NcTalkOutlookAddIn.Services
                 return _uidToEmail.TryGetValue(
                     uid.Trim(),
                     out email);
-            }
-        }
-
-        internal bool TryResolveEmail(
-            TalkServiceConfiguration configuration,
-            int cacheHours,
-            string emailOrLocalPart,
-            out string resolvedEmail)
-        {
-            resolvedEmail = null;
-            if (configuration == null
-                || !configuration.IsComplete())
-            {
-                return false;
-            }
-            string candidate =
-                (emailOrLocalPart ?? string.Empty).Trim();
-            if (candidate.Length == 0)
-            {
-                return false;
-            }
-
-            lock (_syncRoot)
-            {
-                EnsureCache(
-                    configuration,
-                    cacheHours,
-                    CreateScope(configuration));
-                string lowered = candidate.ToLowerInvariant();
-                if (lowered.IndexOf('@') >= 0)
-                {
-                    resolvedEmail = lowered;
-                    return true;
-                }
-                return _localPartToEmail.TryGetValue(
-                    lowered,
-                    out resolvedEmail);
             }
         }
 
@@ -411,9 +371,6 @@ namespace NcTalkOutlookAddIn.Services
                 StringComparer.OrdinalIgnoreCase);
             var uidMap = new Dictionary<string, string>(
                 StringComparer.OrdinalIgnoreCase);
-            var localMap = new Dictionary<string, string>(
-                StringComparer.OrdinalIgnoreCase);
-
             foreach (CacheEntry entry in entries)
             {
                 if (entry == null
@@ -433,20 +390,10 @@ namespace NcTalkOutlookAddIn.Services
                 {
                     uidMap[uid] = email;
                 }
-                int at = email.IndexOf('@');
-                if (at > 0)
-                {
-                    string localPart = email.Substring(0, at);
-                    if (!localMap.ContainsKey(localPart))
-                    {
-                        localMap[localPart] = email;
-                    }
-                }
             }
 
             _emailToUid = emailMap;
             _uidToEmail = uidMap;
-            _localPartToEmail = localMap;
             _generatedUtc = generatedUtc;
             _activeScopeFingerprint = scopeFingerprint;
         }

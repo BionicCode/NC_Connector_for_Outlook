@@ -276,17 +276,6 @@ namespace NcTalkOutlookAddIn.Services
                         days = parsedDays;
                     }
                 }
-                string resolvedEmail;
-                if (!_addressBookCache.TryResolveEmail(_configuration, _cacheHours, email, out resolvedEmail))
-                {
-                    DiagnosticsLogger.Log(LogCategory, "Email could not be resolved: " + email);
-                    WriteError(context, HttpStatusCode.NotFound, "User not found.");
-                    return;
-                }
-
-                DiagnosticsLogger.Log(LogCategory, "IFB-Request: email=" + resolvedEmail + " (original=" + email + ") days=" + days);
-                email = resolvedEmail;
-
                 string uid;
                 if (!_addressBookCache.TryGetUid(_configuration, _cacheHours, email, out uid) || string.IsNullOrEmpty(uid))
                 {
@@ -294,6 +283,7 @@ namespace NcTalkOutlookAddIn.Services
                     WriteError(context, HttpStatusCode.NotFound, "User not found.");
                     return;
                 }
+                DiagnosticsLogger.Log(LogCategory, "IFB-Request: email=" + email + " days=" + days);
                 string freeBusy = null;
                 bool needsFallback = false;
 
