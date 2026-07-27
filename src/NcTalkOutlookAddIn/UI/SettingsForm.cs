@@ -9,7 +9,6 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using NcTalkOutlookAddIn.Services;
@@ -191,7 +190,6 @@ namespace NcTalkOutlookAddIn.UI
             BrandedHeader.AttachToParent(_headerPanel, Controls, HeaderHeight);
             InitializeComponents();
             ApplySettings(settings);
-            UpdateAboutTab();
             UpdateControlState();
             ApplyResponsiveLayout(true);
 
@@ -1227,7 +1225,6 @@ namespace NcTalkOutlookAddIn.UI
             {
                 var service = new UpdateCheckService();
                 UpdateCheckResult result = await service.CheckAsync(Result, true);
-                UpdateUpdateCheckSection();
                 SetStatus(result != null && result.UpdateAvailable ? string.Format(Strings.UpdateAvailableStatusFormat, result.LatestVersion) : Strings.UpdateNoUpdateAvailable, false);
             }
             catch (Exception ex)
@@ -1288,25 +1285,14 @@ namespace NcTalkOutlookAddIn.UI
         {
             try
             {
-                string candidate;
-
                 string assemblyPath = Assembly.GetExecutingAssembly().Location;
                 if (!string.IsNullOrEmpty(assemblyPath))
                 {
                     string baseDir = Path.GetDirectoryName(assemblyPath) ?? string.Empty;
-                    candidate = Path.Combine(baseDir, "License.txt");
-                    if (!string.IsNullOrEmpty(candidate))
-                    {
-                        return candidate;
-                    }
+                    return Path.Combine(baseDir, "License.txt");
                 }
                 string appBase = AppDomain.CurrentDomain.BaseDirectory ?? string.Empty;
-                candidate = Path.Combine(appBase, "License.txt");
-                if (!string.IsNullOrEmpty(candidate))
-                {
-                    return candidate;
-                }
-                return "License.txt";
+                return Path.Combine(appBase, "License.txt");
             }
             catch (Exception ex)
             {
@@ -2432,45 +2418,41 @@ namespace NcTalkOutlookAddIn.UI
         private void OnDebugOpenLinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
             string path = DiagnosticsLogger.LogFileFullPath ?? string.Empty;
+            string target;
+            string failureContext;
             if (File.Exists(path))
             {
-                bool opened = BrowserLauncher.OpenTarget(
-                    path,
-                    LogCategories.Core,
-                    "Failed to open debug log file.");
-                if (!opened)
-                {
-                    MessageBox.Show(
-                        Strings.DebugLogOpenErrorMessage,
-                        Strings.DialogTitle,
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
-                }
-                return;
+                target = path;
+                failureContext = "Failed to open debug log file.";
             }
-            string directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(directory) && Directory.Exists(directory))
+            else
             {
-                bool opened = BrowserLauncher.OpenTarget(
-                    directory,
-                    LogCategories.Core,
-                    "Failed to open debug log directory.");
-                if (!opened)
+                string directory = Path.GetDirectoryName(path);
+                if (string.IsNullOrEmpty(directory)
+                    || !Directory.Exists(directory))
                 {
                     MessageBox.Show(
-                        Strings.DebugLogOpenErrorMessage,
+                        Strings.DebugLogMissingMessage,
                         Strings.DialogTitle,
                         MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
+                        MessageBoxIcon.Information);
+                    return;
                 }
-                return;
+                target = directory;
+                failureContext = "Failed to open debug log directory.";
             }
 
-            MessageBox.Show(
-                Strings.DebugLogMissingMessage,
-                Strings.DialogTitle,
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            if (!BrowserLauncher.OpenTarget(
+                target,
+                LogCategories.Core,
+                failureContext))
+            {
+                MessageBox.Show(
+                    Strings.DebugLogOpenErrorMessage,
+                    Strings.DialogTitle,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         private void UpdateTlsOptionsState()
