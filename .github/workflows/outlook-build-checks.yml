@@ -38,7 +38,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check code-used locale keys
+      - name: Check locale key usage
         shell: pwsh
         run: .\tools\ci\Check-LocaleUsage.ps1
 
