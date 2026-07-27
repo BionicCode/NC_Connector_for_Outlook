@@ -55,7 +55,7 @@ namespace NcTalkOutlookAddIn.Services
                 {
                     DiagnosticsLogger.Log(
                         LogCategories.Talk,
-                        "Recovered the Talk room lifecycle journal from its backup.");
+                        "Recovered the Talk room deletion queue from its backup.");
                     try
                     {
                         File.Copy(
@@ -67,7 +67,7 @@ namespace NcTalkOutlookAddIn.Services
                     {
                         DiagnosticsLogger.LogException(
                             LogCategories.Talk,
-                            "Failed to restore the Talk room lifecycle journal from its backup.",
+                            "Failed to restore the Talk room deletion queue from its backup.",
                             ex);
                     }
                     return state;
@@ -79,7 +79,7 @@ namespace NcTalkOutlookAddIn.Services
                     _writeAllowed = false;
                     DiagnosticsLogger.Log(
                         LogCategories.Talk,
-                        "Talk room lifecycle journal recovery failed; writes are disabled to preserve the existing files.");
+                        "Talk room deletion queue recovery failed; writes are disabled to preserve the existing files.");
                 }
                 return new TalkRoomLifecycleState();
             }
@@ -97,7 +97,7 @@ namespace NcTalkOutlookAddIn.Services
                 if (!_writeAllowed)
                 {
                     throw new InvalidOperationException(
-                        "Talk room lifecycle journal is unreadable; existing data was preserved.");
+                        "Talk room deletion queue is unreadable; existing data was preserved.");
                 }
                 string json = _serializer.Serialize(state);
                 byte[] protectedBytes = ProtectedData.Protect(
@@ -156,7 +156,7 @@ namespace NcTalkOutlookAddIn.Services
                 if (!IsValid(candidate))
                 {
                     throw new InvalidDataException(
-                        "Talk room lifecycle journal structure is invalid.");
+                        "Talk room deletion queue structure is invalid.");
                 }
                 state = candidate;
                 return true;
@@ -165,7 +165,7 @@ namespace NcTalkOutlookAddIn.Services
             {
                 DiagnosticsLogger.LogException(
                     LogCategories.Talk,
-                    "Failed to load Talk room lifecycle journal file '"
+                    "Failed to load Talk room deletion queue file '"
                     + Path.GetFileName(path)
                     + "'.",
                     ex);
@@ -225,10 +225,6 @@ namespace NcTalkOutlookAddIn.Services
         {
             Records = new List<TalkRoomLifecycleRecord>();
         }
-
-        public bool BootstrapCompleted { get; set; }
-
-        public int SafetyVersion { get; set; }
 
         public List<TalkRoomLifecycleRecord> Records { get; set; }
     }

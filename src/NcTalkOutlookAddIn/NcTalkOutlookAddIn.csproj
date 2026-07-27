@@ -101,7 +101,6 @@
     <Compile Include="NextcloudTalkAddIn.SubscriptionEnsure.cs" />
     <Compile Include="NextcloudTalkAddIn.ComposeLifecycle.cs" />
     <Compile Include="NextcloudTalkAddIn.TalkAppointmentSync.cs" />
-    <Compile Include="NextcloudTalkAddIn.TalkCalendarLifecycle.cs" />
     <Compile Include="NextcloudTalkAddIn.TalkRoomLifecycle.cs" />
     <Compile Include="Settings\AddinSettings.cs" />
     <Compile Include="Settings\AuthenticationMode.cs" />
@@ -138,7 +137,6 @@
     <Compile Include="Models\TalkRoomLifecycleRecord.cs" />
     <Compile Include="Controllers\TalkDescriptionTemplateController.cs" />
     <Compile Include="Controllers\TalkAppointmentController.cs" />
-    <Compile Include="Controllers\TalkAppointmentController.Lifecycle.cs" />
     <Compile Include="Controllers\TalkAppointmentController.Sync.cs" />
     <Compile Include="Controllers\SettingsWorkflowController.cs" />
     <Compile Include="Controllers\FileLinkLaunchController.cs" />
@@ -157,7 +155,6 @@
     <Compile Include="Services\IfbRegistryStateStore.cs" />
     <Compile Include="Services\DurableFileReplace.cs" />
     <Compile Include="Services\TalkAppointmentSyncCoordinator.cs" />
-    <Compile Include="Services\TalkCalendarLifecycleMonitor.cs" />
     <Compile Include="Services\TalkRoomLifecycleCoordinator.cs" />
     <Compile Include="Services\TalkRoomLifecycleStore.cs" />
     <Compile Include="Services\TalkLoginFlowService.cs" />

@@ -129,7 +129,7 @@ Root:
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkAppointmentSync.cs`
   STA-Erfassung und Hintergrundverarbeitung von Terminänderungen.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkRoomLifecycle.cs`
-  Start, Wiederherstellung und Teardown für verfolgte Talk-Räume.
+  Start, Retry-Wiederherstellung und Teardown für vorgemerkte Talk-Raum-Löschungen.
 - `src/NcTalkOutlookAddIn/Controllers/SettingsWorkflowController.cs`
   Orchestrierung fuer Settings-Open/Save/Revert.
 - `src/NcTalkOutlookAddIn/Controllers/FileLinkLaunchController.cs`
@@ -141,7 +141,7 @@ Root:
 
 Controller:
 
-- `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` mit `Lifecycle`- und `Sync`-Partials (Terminmetadaten, lokaler Snapshot und entfernte Raumaktualisierung)
+- `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` mit `Sync`-Partial (Terminmetadaten, lokaler Snapshot und entfernte Raumaktualisierung)
 - `src/NcTalkOutlookAddIn/Controllers/ComposeShareCleanupTracker.cs` (In-Memory-Status neu eingefügter, noch nicht geschriebener Compose-Freigaben)
 - `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` (Löschung nicht persistierter oder nicht eingefügter Serverartefakte über den exakten Ursprung sowie Body-, Empfänger-, Absender-, Secrets- und Signaturaufbereitung der Passwortmail)
 - `src/NcTalkOutlookAddIn/Controllers/PendingPasswordDraftController.cs` (gespeicherte Outlook-Passwortentwürfe, Subscription auf den exakten Gesendet-Ordner, Neustart-Wiederherstellung und automatischer/manueller Follow-up-Versand)
@@ -172,7 +172,7 @@ Services:
 - `src/NcTalkOutlookAddIn/Services/EmailSignaturePolicyService.cs` (loest Backend-E-Mail-Signatur-Policy gegen lokale Settings und Lock-State auf)
 - `src/NcTalkOutlookAddIn/Services/UpdateCheckService.cs` (fragt einmal pro Tag `nc-connector.de` nach Outlook-Release-Metadaten und speichert das Ergebnis in den Profil-Settings)
 - `src/NcTalkOutlookAddIn/Services/TalkAppointmentSyncCoordinator.cs` (fasst entfernte Talk-Aktualisierungen aus Outlook-Ereignissen zusammen)
-- `src/NcTalkOutlookAddIn/Services/TalkRoomLifecycleCoordinator.cs` und `TalkRoomLifecycleStore.cs` (Terminverfolgung und wiederholte Raumlöschung)
+- `src/NcTalkOutlookAddIn/Services/TalkRoomLifecycleCoordinator.cs` und `TalkRoomLifecycleStore.cs` (Persistenz und Wiederholung vorgemerkter Raumlöschungen ohne Outlook-Kalenderscan)
 - `src/NcTalkOutlookAddIn/Services/IfbRegistryOwnershipManager.cs` und `IfbRegistryStateStore.cs` (IFB-Registry-Wiederherstellung); `FreeBusyServer.cs` prüft den geheimen Anfragepfad und begrenzt parallele Anfragen.
 
 Update-Check:
@@ -253,8 +253,9 @@ Runtime-Regeln:
 3. `TalkRibbonController` lädt Backend- und Passwort-Policy parallel, bevor der Wizard geöffnet wird. Ein Delegationsziel wird als eigener Benutzer abgelehnt, wenn es zur kanonischen UID, zum konfigurierten Login oder zur bekannten primären E-Mail-Adresse passt.
 4. `TalkService` erstellt den Raum. `TalkAppointmentController.ApplyRoomToAppointment(...)` schreibt URL, lokalisierten Body-Block und `X-NCTALK-*`-Metadaten in den Termin.
 5. Beim Speichern liest die Appointment-Subscription die benötigten Outlook-Werte auf dem STA-Thread. `TalkAppointmentSyncCoordinator` fasst unveränderliche Snapshots zusammen und führt Lobby-, Beschreibungs-, Teilnehmer- und Delegationsaufrufe im Hintergrund aus.
-6. Beim Start überwacht der Lifecycle-Koordinator die Standardkalender und Kalender-Unterordner aller eingebundenen Stores. Das begrenzte Startfenster reicht ein Jahr zurück und fünf Jahre voraus; Item-Ereignisse verfolgen spätere Verschiebungen und Änderungen.
-7. Das DPAPI-geschützte Raumjournal besitzt Primärdatei und Sicherung. Nur Outlooks eindeutiges „nicht gefunden“ bestätigt eine Terminlöschung. Nicht erreichbare Stores und andere COM-Fehler behalten den Eintrag für einen verzögerten Retry.
+6. `BeforeDelete` verwendet Outlooks terminspezifisches Löschereignis. Organizer-, Token-, Delegations- und Serienprüfung laufen an diesem Termin, bevor `QueueSavedTalkRoomDeletion(...)` einen Löschauftrag mit `PolicyRequired=true` erstellt; URL- oder Ortsauswertung ist keine Löschquelle. Der Hintergrund-Worker wertet die wirksame `TalkDeleteRoomOnEventDelete`-Policy vor der Raumlöschung aus. Derselbe Ereignispfad gilt für die Löschung aus dem geöffneten Termin und aus der Kalenderansicht.
+7. Beim Start wird nur der persistente Lösch-Retry-Worker initialisiert. Stores oder Kalenderordner werden nicht aufgezählt, Kalenderelemente nicht durchsucht und keine ordnerbezogenen `Items`-Subscriptions gehalten.
+8. Die DPAPI-geschützte Löschqueue besitzt Primärdatei und Sicherung. Die Nextcloud-Löschung läuft im Hintergrund; fehlgeschlagene Löschungen werden verzögert und nach einem Outlook-Neustart wiederholt. Die Bereinigung eines neu erstellten Raums aus einem ungespeicherten und verworfenen Termin verwendet dieselbe Queue mit `PolicyRequired=false`. Beim Laden älterer Zustände bleiben nur bereits zur Löschung vorgemerkte Einträge erhalten; reine Tracking-Einträge werden verworfen.
 
 #### HTML-Subset für Talk-Termine (Backend-Vorlagen)
 
@@ -464,11 +465,12 @@ Vorgeschlagener Ablauf:
 2. Kalender: Neuen Termin erstellen, einen Talk-Link einfügen, speichern, Startzeit ändern und erneut speichern.
 3. Kalender: Outlook neu starten, denselben Termin öffnen, die Startzeit ändern und erneut speichern.
 4. Kalender: Teilnehmer hinzufügen und erneut speichern.
-5. Mail: Freigabe-Wizard ausführen, ein oder zwei kleine Dateien hochladen, den Freigabeblock einfügen und an das eigene Konto senden.
-6. Mail: Eine Freigabe einfügen und die Nachricht vor dem Speichern verwerfen; prüfen, dass der exakte Serverordner entfernt wird. Mit Speichern oder AutoSave wiederholen und prüfen, dass die Freigabe bestehen bleibt.
-7. Mail: Bei separater Passwortzustellung die Freigabe erstellen und im selben Verfassen-Fenster auf **Senden** klicken. Mit Outlooks verzögerter Übermittlung wiederholen und Outlook neu starten, während die Hauptmail im Postausgang liegt; die vorbereitete Follow-up-Mail muss bis zur Bestätigung in „Gesendete Elemente“ ausstehend bleiben. Ein geschlossener und erneut geöffneter Hauptentwurf oder eine `.oft`-Vorlage mit vorhandenem Freigabeblock liegt außerhalb des unterstützten Ablaufs und benötigt vor dem Versand eine neue Freigabe.
-8. IFB: IFB aktivieren, URL-Reservierung und TCP-Listener prüfen und danach im Outlook-Terminplanungs-Assistenten eine Adresse verwenden, deren Domain vom konfigurierten Nextcloud-Login und -Host abweicht. Eine direkte Anfrage ohne Profil-Secret muss `404` liefern.
-9. **Einstellungen -> Erweitert -> Jetzt prüfen** ausführen und kontrollieren, dass aktuelle Version, letzte Prüfung, Download-Link und Änderungsübersicht ohne blockierte Outlook-Oberfläche aktualisiert werden.
+5. Kalender: Die Raumlöschung gespeicherter Termine aktivieren und gespeicherte Talk-Termine einmal aus dem geöffneten Termin und einmal aus der Kalenderansicht löschen. Prüfen, dass der jeweilige Raum entfernt wird. Den Test einmal mit einem vorübergehenden Nextcloud-Fehler wiederholen, Outlook neu starten und den vorgemerkten Retry prüfen.
+6. Mail: Freigabe-Wizard ausführen, ein oder zwei kleine Dateien hochladen, den Freigabeblock einfügen und an das eigene Konto senden.
+7. Mail: Eine Freigabe einfügen und die Nachricht vor dem Speichern verwerfen; prüfen, dass der exakte Serverordner entfernt wird. Mit Speichern oder AutoSave wiederholen und prüfen, dass die Freigabe bestehen bleibt.
+8. Mail: Bei separater Passwortzustellung die Freigabe erstellen und im selben Verfassen-Fenster auf **Senden** klicken. Mit Outlooks verzögerter Übermittlung wiederholen und Outlook neu starten, während die Hauptmail im Postausgang liegt; die vorbereitete Follow-up-Mail muss bis zur Bestätigung in „Gesendete Elemente“ ausstehend bleiben. Ein geschlossener und erneut geöffneter Hauptentwurf oder eine `.oft`-Vorlage mit vorhandenem Freigabeblock liegt außerhalb des unterstützten Ablaufs und benötigt vor dem Versand eine neue Freigabe.
+9. IFB: IFB aktivieren, URL-Reservierung und TCP-Listener prüfen und danach im Outlook-Terminplanungs-Assistenten eine Adresse verwenden, deren Domain vom konfigurierten Nextcloud-Login und -Host abweicht. Eine direkte Anfrage ohne Profil-Secret muss `404` liefern.
+10. **Einstellungen -> Erweitert -> Jetzt prüfen** ausführen und kontrollieren, dass aktuelle Version, letzte Prüfung, Download-Link und Änderungsübersicht ohne blockierte Outlook-Oberfläche aktualisiert werden.
 
 ## Referenz der X-NCTALK-*-Eigenschaften
 

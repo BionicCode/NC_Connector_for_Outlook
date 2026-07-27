@@ -103,11 +103,11 @@ Key code locations:
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.ComposeLifecycle.cs` — composition-root bridge for queued share cleanup and confirmed password dispatch
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.AppointmentSubscription.cs` — appointment runtime subscription lifecycle
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkAppointmentSync.cs` — STA capture and background dispatch for appointment changes
-- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkRoomLifecycle.cs` — startup, recovery, and teardown for tracked Talk rooms
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkRoomLifecycle.cs` — startup, retry recovery, and teardown for queued Talk room deletions
 - `src/NcTalkOutlookAddIn/Controllers/SettingsWorkflowController.cs` — settings open/save/revert orchestration
 - `src/NcTalkOutlookAddIn/Controllers/FileLinkLaunchController.cs` — FileLink ribbon launch + wizard orchestration
 - `src/NcTalkOutlookAddIn/Controllers/TalkRibbonController.cs` — Talk ribbon flow orchestration (auth gate, wizard, room create/replace)
-- `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` with `Lifecycle` and `Sync` partials — appointment metadata, local snapshot capture, and remote room updates
+- `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` with its `Sync` partial — appointment metadata, local snapshot capture, and remote room updates
 - `src/NcTalkOutlookAddIn/Controllers/ComposeShareCleanupTracker.cs` — in-memory pending-write state for newly inserted compose shares
 - `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` — exact-origin deletion of unpersisted or insertion-failed server artifacts, plus password-mail body, recipient, sender, Secrets, and signature preparation
 - `src/NcTalkOutlookAddIn/Controllers/PendingPasswordDraftController.cs` — saved Outlook password drafts, exact Sent-folder subscriptions, restart recovery, and automatic/manual follow-up dispatch
@@ -122,7 +122,7 @@ Key code locations:
   - `Services/EmailSignaturePolicyService.cs` resolves backend email-signature policy values against local settings and lock state.
   - `Services/UpdateCheckService.cs` checks `nc-connector.de` once per day for Outlook release metadata and stores the cached result in profile settings.
   - `Services/TalkAppointmentSyncCoordinator.cs` coalesces background Talk updates captured from Outlook events.
-  - `Services/TalkRoomLifecycleCoordinator.cs` and `TalkRoomLifecycleStore.cs` track calendar items and retry room deletion.
+  - `Services/TalkRoomLifecycleCoordinator.cs` and `TalkRoomLifecycleStore.cs` persist and retry queued room deletions without scanning Outlook calendars.
   - `Services/IfbRegistryOwnershipManager.cs` and `IfbRegistryStateStore.cs` own IFB registry recovery; `FreeBusyServer.cs` validates the secret request path and limits concurrent requests.
 - `src/NcTalkOutlookAddIn/UI/` — WinForms dialogs and wizards
   - `UI/ScaledForm.cs` is the shared DPI-scaling base for forms that use logical pixel layout helpers.
@@ -231,9 +231,9 @@ Runtime rules:
    - **Write** captures the required Outlook values on the STA thread. `TalkAppointmentSyncCoordinator` coalesces the immutable snapshots and performs lobby, description, participant, and delegation requests in the background.
    - If Outlook exposes the final changed start time only shortly after `Write`, a short deferred post-write capture reads that same opened appointment instead of scanning calendars.
    - **Close** of a newly created, unsaved appointment queues orphan-room cleanup.
-   - **BeforeDelete** and calendar-folder item events update `TalkRoomLifecycleCoordinator` only when saved-event deletion is opted in and the appointment has `X-NCTALK-TOKEN`; URL/location parsing is not a deletion source.
-7. On startup, the lifecycle coordinator subscribes to default calendars and calendar subfolders in every mounted store. A bounded bootstrap window covers one year in the past through five years in the future; item events track later moves and changes.
-8. The DPAPI-protected room journal uses a primary file and backup. Missing-item reconciliation treats only Outlook's not-found result as confirmed deletion. Unavailable stores and other COM failures keep the record for a delayed retry.
+   - **BeforeDelete** uses Outlook's appointment-specific deletion event. Organizer, token, delegation, and recurrence checks run on that appointment before `QueueSavedTalkRoomDeletion(...)` creates a deletion job with `PolicyRequired=true`; URL/location parsing is not a deletion source. The background worker resolves the effective `TalkDeleteRoomOnEventDelete` policy before deleting the room. The same event path covers deletion from an open appointment and from the calendar view.
+7. Startup initializes only the persistent deletion retry worker. It does not enumerate Outlook stores or calendar folders, scan calendar items, or retain folder-level `Items` subscriptions.
+8. The DPAPI-protected deletion queue uses a primary file and backup. Nextcloud deletion runs in the background, and queued failures are retried after delay and after an Outlook restart. Cleanup of a newly created room from an unsaved, discarded appointment uses the same queue with `PolicyRequired=false`. When older state is loaded, only records already marked for deletion survive; tracking-only records are discarded.
 
 #### Talk appointment-safe HTML subset (backend custom templates)
 
@@ -513,11 +513,12 @@ Suggested smoke test sequence:
 2. Calendar: create a new appointment, insert a Talk link, save the appointment, then change start time and save again (lobby update).
 3. Calendar: restart Outlook, open the same appointment, change start time and save again (persistent metadata + lobby update).
 4. Calendar: add attendees, save again (participant sync).
-5. Mail: run the sharing wizard, upload 1–2 small files, insert the HTML block, and send to yourself.
-6. Mail: insert a share and discard the message before it is saved; verify that the exact server folder is removed. Repeat with Save or AutoSave and verify that the share remains.
-7. Mail: with separate password delivery, create the share and click Send from the same compose window. Repeat with Outlook delayed delivery and restart Outlook while the primary mail remains in the Outbox; the prepared follow-up must stay pending until Sent Items confirmation. A closed and reopened primary draft or an `.oft` template with an existing share block is outside the supported flow and requires a new share before sending.
-8. IFB: enable IFB, verify the URL reservation and TCP listener, then use Outlook's Scheduling Assistant with an address whose domain differs from the configured Nextcloud login and host. A direct request without the profile secret is expected to return `404`.
-9. Settings -> Advanced: click `Check now` and verify that latest version, last check, download link, and changelog summary update without blocking Outlook.
+5. Calendar: enable saved-event room deletion, then delete saved Talk appointments from an open appointment and from the calendar view. Verify that each associated room is removed. Repeat once with a temporary Nextcloud failure, restart Outlook, and verify the queued retry.
+6. Mail: run the sharing wizard, upload 1–2 small files, insert the HTML block, and send to yourself.
+7. Mail: insert a share and discard the message before it is saved; verify that the exact server folder is removed. Repeat with Save or AutoSave and verify that the share remains.
+8. Mail: with separate password delivery, create the share and click Send from the same compose window. Repeat with Outlook delayed delivery and restart Outlook while the primary mail remains in the Outbox; the prepared follow-up must stay pending until Sent Items confirmation. A closed and reopened primary draft or an `.oft` template with an existing share block is outside the supported flow and requires a new share before sending.
+9. IFB: enable IFB, verify the URL reservation and TCP listener, then use Outlook's Scheduling Assistant with an address whose domain differs from the configured Nextcloud login and host. A direct request without the profile secret is expected to return `404`.
+10. Settings -> Advanced: click `Check now` and verify that latest version, last check, download link, and changelog summary update without blocking Outlook.
 
 ## X-NCTALK-* property reference
 

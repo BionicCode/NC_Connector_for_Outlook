@@ -34,12 +34,27 @@ function Assert-SourceAbsent {
     Write-Host "[OK] $Name"
 }
 
+function Assert-PathAbsent {
+    param(
+        [string]$Name,
+        [string]$Path
+    )
+
+    if (Test-Path -LiteralPath $Path) {
+        throw "Source check failed: $Name"
+    }
+    Write-Host "[OK] $Name"
+}
+
 $calendarLifecycle = Join-Path $SourceRoot "NextcloudTalkAddIn.TalkCalendarLifecycle.cs"
 $calendarMonitor = Join-Path $SourceRoot "Services\TalkCalendarLifecycleMonitor.cs"
 $appointmentController = Join-Path $SourceRoot "Controllers\TalkAppointmentController.cs"
 $appointmentSyncController = Join-Path $SourceRoot "Controllers\TalkAppointmentController.Sync.cs"
 $appointmentSubscription = Join-Path $SourceRoot "NextcloudTalkAddIn.AppointmentSubscription.cs"
 $appointmentSync = Join-Path $SourceRoot "NextcloudTalkAddIn.TalkAppointmentSync.cs"
+$talkLifecycle = Join-Path $SourceRoot "NextcloudTalkAddIn.TalkRoomLifecycle.cs"
+$lifecycle = Join-Path $SourceRoot "NextcloudTalkAddIn.Lifecycle.cs"
+$talkCoordinator = Join-Path $SourceRoot "Services\TalkRoomLifecycleCoordinator.cs"
 $ifbManager = Join-Path $SourceRoot "Services\FreeBusyManager.cs"
 $ifbServer = Join-Path $SourceRoot "Services\FreeBusyServer.cs"
 $ifbCache = Join-Path $SourceRoot "Services\IfbAddressBookCache.cs"
@@ -47,26 +62,60 @@ $ifbOwnership = Join-Path $SourceRoot "Services\IfbRegistryOwnershipManager.cs"
 $talkStore = Join-Path $SourceRoot "Services\TalkRoomLifecycleStore.cs"
 $ifbStore = Join-Path $SourceRoot "Services\IfbRegistryStateStore.cs"
 
+Assert-PathAbsent `
+    "Global Talk calendar lifecycle partial is removed" `
+    $calendarLifecycle
+Assert-PathAbsent `
+    "Global Talk calendar monitor is removed" `
+    $calendarMonitor
+foreach ($path in @(
+    $appointmentSubscription,
+    $talkLifecycle,
+    $lifecycle,
+    $talkCoordinator,
+    $talkStore
+)) {
+    Assert-SourceAbsent `
+        "Targeted Talk lifecycle does not enumerate Outlook stores in $path" `
+        $path `
+        '(?i)(?:session|application\.Session)\.Stores'
+    Assert-SourceAbsent `
+        "Targeted Talk lifecycle does not scan calendar item collections in $path" `
+        $path `
+        'TryScanAll|ReconcileSuccessfulScan'
+    Assert-SourceAbsent `
+        "Targeted Talk lifecycle does not subscribe to folder item events in $path" `
+        $path `
+        'ItemsEvents_Item(?:Add|Change|Remove)'
+}
+Assert-SourceContract `
+    "Outlook startup initializes only the pending Talk deletion queue" `
+    $lifecycle `
+    'InitializeTalkRoomLifecycle\s*\('
 Assert-SourceAbsent `
-    "Calendar lifecycle never infers deletion from EntryID lookup" `
-    $calendarLifecycle `
-    'GetItemFromID|IsMapiNotFound'
+    "Outlook startup does not start calendar reconciliation" `
+    $lifecycle `
+    'StartTalkRoomLifecycleRecovery|EnsureTalkCalendarLifecycleMonitor'
 Assert-SourceContract `
-    "Deletion requires a successful all-calendar reconciliation" `
-    $calendarLifecycle `
-    'TryScanAll[\s\S]*ReconcileSuccessfulScan'
-Assert-SourceContract `
-    "Calendar lifecycle watches ItemRemove instead of retaining appointment subscriptions" `
-    $calendarMonitor `
-    'ItemsEvents_ItemRemoveEventHandler'
-Assert-SourceContract `
-    "Calendar lifecycle enumerates every mounted Outlook store" `
-    $calendarMonitor `
-    'session\.Stores'
-Assert-SourceAbsent `
-    "BeforeDelete does not queue a room deletion" `
+    "Appointment BeforeDelete rejects cancelled deletion and recurrence instances" `
     $appointmentSubscription `
-    'QueueSavedEventRoomDeletion|QueueTrackedSavedEventRoomDeletion'
+    'OnBeforeDelete[\s\S]*if\s*\(\s*cancel\s*\)[\s\S]*IsRoomDeletionAllowedForRecurrence\s*\(\s*\)[\s\S]*QueueSavedTalkRoomDeletion\s*\(\s*\)'
+Assert-SourceContract `
+    "Recurring occurrences and exceptions retain the shared Talk room" `
+    $appointmentSubscription `
+    'OlRecurrenceState\.olApptNotRecurring[\s\S]*OlRecurrenceState\.olApptMaster'
+Assert-SourceContract `
+    "Saved appointment deletion skips rooms delegated to another user" `
+    $appointmentSubscription `
+    'QueueSavedTalkRoomDeletion[\s\S]*IsDelegatedToOtherUser[\s\S]*return;[\s\S]*_owner\.QueueSavedTalkRoomDeletion'
+Assert-SourceContract `
+    "Saved appointment deletion creates a policy-required durable job" `
+    $talkLifecycle `
+    'QueueSavedTalkRoomDeletion[\s\S]*QueueTalkRoomDeletion\([\s\S]*true\s*\)'
+Assert-SourceContract `
+    "Unsaved appointment cleanup creates an unconditional durable job" `
+    $talkLifecycle `
+    'QueueUnsavedTalkRoomDeletion[\s\S]*QueueTalkRoomDeletion\([\s\S]*false\s*\)'
 Assert-SourceAbsent `
     "Remote promotion does not leave the room before Outlook persistence" `
     $appointmentSyncController `
@@ -157,25 +206,11 @@ namespace NcTalkOutlookAddIn.Utilities
             string message,
             Exception ex) { }
     }
-
-    internal static class LogCategories
-    {
-        internal const string Talk = "talk";
-        internal const string Ifb = "ifb";
-    }
-
-    internal static class AppDataPaths
-    {
-        internal static string EnsureLocalRootDirectory()
-        {
-            return Path.GetTempPath();
-        }
-    }
 }
 
 namespace NcTalkOutlookAddIn.Settings
 {
-    internal sealed class AddinSettings
+    internal class AddinSettings
     {
         public string ServerUrl { get; set; }
         public string Username { get; set; }
@@ -185,41 +220,13 @@ namespace NcTalkOutlookAddIn.Settings
 
 namespace NcTalkOutlookAddIn.Services
 {
-    internal sealed class TalkServiceConfiguration
-    {
-        internal TalkServiceConfiguration(
-            string serverUrl,
-            string username,
-            string appPassword)
-        {
-            ServerUrl = serverUrl ?? string.Empty;
-            Username = username ?? string.Empty;
-            AppPassword = appPassword ?? string.Empty;
-        }
-
-        internal string ServerUrl { get; private set; }
-        internal string Username { get; private set; }
-        internal string AppPassword { get; private set; }
-
-        internal bool IsComplete()
-        {
-            return ServerUrl.Length > 0
-                && Username.Length > 0
-                && AppPassword.Length > 0;
-        }
-
-        internal string GetNormalizedBaseUrl()
-        {
-            return ServerUrl.TrimEnd('/');
-        }
-    }
-
     internal static class NextcloudUserIdentityService
     {
         internal static string CanonicalUserId = "alice";
 
         internal static string ResolveCurrentUserId(
-            TalkServiceConfiguration configuration)
+            TalkServiceConfiguration configuration,
+            bool forceRefresh = false)
         {
             return CanonicalUserId;
         }
@@ -259,8 +266,11 @@ internal static class TalkIfbLifecycleTests
 
     public static int Main()
     {
-        TestLifecycleReconciliation();
         TestLifecycleAccountMatching();
+        TestPolicyRequiredDeletion();
+        TestUnconditionalDeletion();
+        TestDeletionRetryAcrossRestart();
+        TestPendingStoreMigration();
         TestSyncCoalescing();
         TestDurableReplacement();
 
@@ -272,96 +282,333 @@ internal static class TalkIfbLifecycleTests
         return 0;
     }
 
-    private static void TestLifecycleReconciliation()
+    private static void TestLifecycleAccountMatching()
     {
-        string root = Path.Combine(
-            Path.GetTempPath(),
-            "nc4ol-lifecycle-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var configuration = NewConfiguration("me@example.org");
-        var settings = new NcTalkOutlookAddIn.Settings.AddinSettings
+        var record = new TalkRoomLifecycleRecord
         {
-            ServerUrl = configuration.ServerUrl,
-            Username = configuration.Username,
-            AppPassword = configuration.AppPassword
+            ServerBaseUrl =
+                "https://cloud.example.org/nextcloud",
+            AccountLogin = "old-login",
+            AccountId = "alice",
+            RoomToken = "room",
+            PendingDeletion = true
         };
+        Check(
+            "Canonical account ID accepts a changed login alias",
+            TalkRoomLifecycleCoordinator.MatchesAccount(
+                record,
+                record.ServerBaseUrl,
+                "new-login",
+                "alice"));
+        Check(
+            "Canonical account ID rejects another account",
+            !TalkRoomLifecycleCoordinator.MatchesAccount(
+                record,
+                record.ServerBaseUrl,
+                "old-login",
+                "bob"));
+
+        record.AccountId = string.Empty;
+        record.AccountLogin = "me@example.org";
+        Check(
+            "Unbound deletion job requires its exact login",
+            TalkRoomLifecycleCoordinator.MatchesAccount(
+                record,
+                record.ServerBaseUrl,
+                "me@example.org",
+                "alice")
+            && !TalkRoomLifecycleCoordinator.MatchesAccount(
+                record,
+                record.ServerBaseUrl,
+                "other@example.org",
+                "alice"));
+    }
+
+    private static void TestPolicyRequiredDeletion()
+    {
+        string root = NewTestRoot("policy");
+        const string profile = "policy-profile";
+        var policyStarted = new ManualResetEventSlim(false);
+        var releasePolicy = new ManualResetEventSlim(false);
+        int deleteCount = 0;
         var coordinator = new TalkRoomLifecycleCoordinator(
             root,
-            "profile",
-            () => settings,
-            () => true);
+            profile,
+            NewSettings,
+            () =>
+            {
+                policyStarted.Set();
+                releasePolicy.Wait(TimeSpan.FromSeconds(5));
+                return false;
+            },
+            configuration => "alice",
+            (configuration, token, isEventConversation) =>
+                Interlocked.Increment(ref deleteCount));
         try
         {
-            DateTime start = DateTime.UtcNow;
-            var original = NewLifecycleSnapshot(
-                configuration,
-                "global-1",
-                "room",
-                "entry-1");
-            coordinator.ReconcileSuccessfulScan(
-                configuration,
-                new[] { original },
-                start);
-
-            var moved = NewLifecycleSnapshot(
-                configuration,
-                "global-1",
-                string.Empty,
-                "entry-2");
-            TalkRoomReconcileResult movedResult =
-                coordinator.ReconcileSuccessfulScan(
-                    configuration,
-                    new[] { moved },
-                    start.AddSeconds(1));
             Check(
-                "GlobalAppointmentID keeps a moved appointment active",
-                !movedResult.NeedsFollowUp
-                && movedResult.ConfirmedDeletionCount == 0);
-
-            var rekeyed = NewLifecycleSnapshot(
-                configuration,
-                "global-2",
-                "room",
-                "entry-3");
-            TalkRoomReconcileResult rekeyedResult =
-                coordinator.ReconcileSuccessfulScan(
-                    configuration,
-                    new[] { rekeyed },
-                    start.AddSeconds(2));
+                "Policy-required deletion accepts a complete job",
+                coordinator.QueueDeletion(
+                    "policy-room",
+                    true,
+                    NewConfiguration(),
+                    true));
             Check(
-                "Room token keeps a rekeyed appointment active",
-                !rekeyedResult.NeedsFollowUp
-                && rekeyedResult.ConfirmedDeletionCount == 0);
-
-            TalkRoomReconcileResult firstMissing =
-                coordinator.ReconcileSuccessfulScan(
-                    configuration,
-                    new TalkRoomTrackingSnapshot[0],
-                    start.AddSeconds(3));
+                "Policy-required deletion reaches the policy gate",
+                policyStarted.Wait(TimeSpan.FromSeconds(5)));
+            TalkRoomLifecycleState pending =
+                LoadLifecycleState(root, profile);
             Check(
-                "First complete absence is only a candidate",
-                firstMissing.NeedsFollowUp
-                && firstMissing.ConfirmedDeletionCount == 0);
+                "Policy-required deletion is persisted before evaluation",
+                pending.Records.Count == 1
+                && pending.Records[0].PolicyRequired
+                && pending.Records[0].PendingDeletion
+                && pending.Records[0].AccountId == "alice");
 
-            TalkRoomReconcileResult tooSoon =
-                coordinator.ReconcileSuccessfulScan(
-                    configuration,
-                    new TalkRoomTrackingSnapshot[0],
-                    start.AddSeconds(10));
+            releasePolicy.Set();
             Check(
-                "A repeated scan before the safety interval cannot delete",
-                tooSoon.NeedsFollowUp
-                && tooSoon.ConfirmedDeletionCount == 0);
+                "Disabled saved-event deletion removes the pending job",
+                WaitUntil(
+                    () => ReadCoordinatorRecord(
+                        coordinator,
+                        "policy-room") == null));
+            Check(
+                "Policy-off removal is saved to the durable queue",
+                LoadLifecycleState(
+                    root,
+                    profile).Records.Count == 0);
+            Check(
+                "Disabled saved-event deletion does not call Talk",
+                Volatile.Read(ref deleteCount) == 0);
+        }
+        finally
+        {
+            releasePolicy.Set();
+            coordinator.Dispose();
+            Directory.Delete(root, true);
+        }
+    }
 
-            TalkRoomReconcileResult confirmed =
-                coordinator.ReconcileSuccessfulScan(
-                    configuration,
-                    new TalkRoomTrackingSnapshot[0],
-                    start.AddSeconds(34));
+    private static void TestUnconditionalDeletion()
+    {
+        string root = NewTestRoot("unconditional");
+        const string profile = "unconditional-profile";
+        var deleted = new ManualResetEventSlim(false);
+        var releaseDelete = new ManualResetEventSlim(false);
+        int policyCount = 0;
+        string deletedToken = string.Empty;
+        bool deletedEventRoom = false;
+        var coordinator = new TalkRoomLifecycleCoordinator(
+            root,
+            profile,
+            NewSettings,
+            () =>
+            {
+                Interlocked.Increment(ref policyCount);
+                return false;
+            },
+            configuration => "alice",
+            (configuration, token, isEventConversation) =>
+            {
+                deletedToken = token;
+                deletedEventRoom = isEventConversation;
+                deleted.Set();
+                releaseDelete.Wait(TimeSpan.FromSeconds(5));
+            });
+        try
+        {
             Check(
-                "A second complete absence after the safety interval confirms deletion",
-                !confirmed.NeedsFollowUp
-                && confirmed.ConfirmedDeletionCount == 1);
+                "Unsaved cleanup accepts a complete job",
+                coordinator.QueueDeletion(
+                    "unsaved-room",
+                    true,
+                    NewConfiguration(),
+                    false));
+            Check(
+                "Unsaved cleanup executes without the saved-event policy",
+                deleted.Wait(TimeSpan.FromSeconds(5)));
+            Check(
+                "Unsaved cleanup preserves token and room type",
+                deletedToken == "unsaved-room"
+                && deletedEventRoom);
+            Check(
+                "Unsaved cleanup does not evaluate saved-event policy",
+                Volatile.Read(ref policyCount) == 0);
+            TalkRoomLifecycleRecord pending =
+                ReadCoordinatorRecord(
+                    coordinator,
+                    "unsaved-room");
+            Check(
+                "Unsaved cleanup is durable before the Talk call completes",
+                pending != null
+                && pending.PendingDeletion
+                && !pending.PolicyRequired);
+            releaseDelete.Set();
+            Check(
+                "Successful unsaved cleanup clears the pending job",
+                WaitUntil(
+                    () => ReadCoordinatorRecord(
+                        coordinator,
+                        "unsaved-room") == null));
+            Check(
+                "Successful unsaved cleanup updates the durable queue",
+                LoadLifecycleState(
+                    root,
+                    profile).Records.Count == 0);
+        }
+        finally
+        {
+            releaseDelete.Set();
+            coordinator.Dispose();
+            Directory.Delete(root, true);
+        }
+    }
+
+    private static void TestDeletionRetryAcrossRestart()
+    {
+        string root = NewTestRoot("retry");
+        const string profile = "retry-profile";
+        var failed = new ManualResetEventSlim(false);
+        var releaseFailure = new ManualResetEventSlim(false);
+        var firstCoordinator = new TalkRoomLifecycleCoordinator(
+            root,
+            profile,
+            NewSettings,
+            () => true,
+            configuration => "alice",
+            (configuration, token, isEventConversation) =>
+            {
+                failed.Set();
+                releaseFailure.Wait(TimeSpan.FromSeconds(5));
+                throw new InvalidOperationException("retry");
+            });
+        try
+        {
+            Check(
+                "Retry test accepts a complete deletion job",
+                firstCoordinator.QueueDeletion(
+                    "retry-room",
+                    false,
+                    NewConfiguration(),
+                    true));
+            Check(
+                "Failed deletion reaches the retry worker",
+                failed.Wait(TimeSpan.FromSeconds(5)));
+            TalkRoomLifecycleRecord pending =
+                ReadCoordinatorRecord(
+                    firstCoordinator,
+                    "retry-room");
+            Check(
+                "Deletion job remains pending while Talk is in flight",
+                pending != null
+                && pending.PendingDeletion
+                && pending.AttemptCount == 0);
+            releaseFailure.Set();
+            Check(
+                "Failed deletion remains persisted with retry metadata",
+                WaitUntil(
+                    () =>
+                    {
+                        TalkRoomLifecycleRecord record =
+                            ReadCoordinatorRecord(
+                                firstCoordinator,
+                                "retry-room");
+                        return record != null
+                            && record.AttemptCount == 1
+                            && record.NextAttemptUtc
+                                > DateTime.UtcNow;
+                    }));
+            TalkRoomLifecycleState savedRetry =
+                LoadLifecycleState(root, profile);
+            Check(
+                "Retry metadata is written to the durable queue",
+                savedRetry.Records.Count == 1
+                && savedRetry.Records[0].AttemptCount == 1
+                && savedRetry.Records[0].AccountId == "alice");
+        }
+        finally
+        {
+            releaseFailure.Set();
+            firstCoordinator.Dispose();
+        }
+
+        TalkRoomLifecycleState retryState =
+            LoadLifecycleState(root, profile);
+        retryState.Records[0].NextAttemptUtc = DateTime.MinValue;
+        new TalkRoomLifecycleStore(root, profile).Save(retryState);
+
+        var deleted = new ManualResetEventSlim(false);
+        var releaseRestartDelete =
+            new ManualResetEventSlim(false);
+        var restartedCoordinator = new TalkRoomLifecycleCoordinator(
+            root,
+            profile,
+            () => NewSettings("renamed-login"),
+            () => true,
+            configuration => "alice",
+            (configuration, token, isEventConversation) =>
+            {
+                if (token == "retry-room" && !isEventConversation)
+                {
+                    deleted.Set();
+                    releaseRestartDelete.Wait(
+                        TimeSpan.FromSeconds(5));
+                }
+            });
+        try
+        {
+            restartedCoordinator.StartPendingProcessing();
+            Check(
+                "Restart matches the canonical account after a login alias change",
+                deleted.Wait(TimeSpan.FromSeconds(5)));
+            releaseRestartDelete.Set();
+            Check(
+                "Restarted deletion clears its durable job",
+                WaitUntil(
+                    () => ReadCoordinatorRecord(
+                        restartedCoordinator,
+                        "retry-room") == null));
+            Check(
+                "Restarted deletion updates the durable queue",
+                LoadLifecycleState(
+                    root,
+                    profile).Records.Count == 0);
+        }
+        finally
+        {
+            releaseRestartDelete.Set();
+            restartedCoordinator.Dispose();
+            Directory.Delete(root, true);
+        }
+    }
+
+    private static void TestPendingStoreMigration()
+    {
+        string root = NewTestRoot("migration");
+        const string profile = "migration-profile";
+        var state = new TalkRoomLifecycleState();
+        state.Records.Add(
+            NewLifecycleRecord("obsolete-room", false));
+        state.Records.Add(
+            NewLifecycleRecord("pending-room", true));
+        new TalkRoomLifecycleStore(root, profile).Save(state);
+
+        var coordinator = new TalkRoomLifecycleCoordinator(
+            root,
+            profile,
+            NewSettings,
+            () => true,
+            configuration => "alice",
+            (configuration, token, isEventConversation) => { });
+        try
+        {
+            TalkRoomLifecycleState migrated =
+                LoadLifecycleState(root, profile);
+            Check(
+                "Startup drops obsolete calendar tracking records",
+                migrated.Records.Count == 1
+                && migrated.Records[0].RoomToken == "pending-room"
+                && migrated.Records[0].PendingDeletion);
         }
         finally
         {
@@ -370,64 +617,135 @@ internal static class TalkIfbLifecycleTests
         }
     }
 
-    private static void TestLifecycleAccountMatching()
+    private static TalkRoomLifecycleRecord NewLifecycleRecord(
+        string token,
+        bool pendingDeletion)
     {
-        var record = new TalkRoomLifecycleRecord
+        return new TalkRoomLifecycleRecord
         {
-            ServerBaseUrl = "https://cloud.example.org/nextcloud",
-            AccountLogin = "old-login",
-            AccountId = "alice",
-            RoomToken = "room"
+            RoomToken = token,
+            ServerBaseUrl =
+                "https://cloud.example.org/nextcloud",
+            AccountLogin = "me@example.org",
+            PendingDeletion = pendingDeletion,
+            PolicyRequired = true,
+            NextAttemptUtc = DateTime.UtcNow.AddHours(1)
         };
-        Check(
-            "Lifecycle matches canonical UID across login aliases",
-            TalkRoomLifecycleCoordinator.MatchesAccount(
-                record,
-                record.ServerBaseUrl,
-                "new-login",
-                "alice"));
-        Check(
-            "Lifecycle rejects another canonical account",
-            !TalkRoomLifecycleCoordinator.MatchesAccount(
-                record,
-                record.ServerBaseUrl,
-                "old-login",
-                "bob"));
-        record.AccountId = string.Empty;
-        record.AccountLogin = "me@example.org";
-        Check(
-            "Unbound lifecycle record requires its exact login",
-            TalkRoomLifecycleCoordinator.MatchesAccount(
-                record,
-                record.ServerBaseUrl,
-                "me@example.org",
-                "alice"));
     }
 
-    private static TalkServiceConfiguration NewConfiguration(
-        string login)
+    private static string NewTestRoot(string name)
     {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "nc4ol-" + name + "-"
+            + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        return root;
+    }
+
+    private static NcTalkOutlookAddIn.Settings.AddinSettings
+        NewSettings()
+    {
+        return NewSettings("me@example.org");
+    }
+
+    private static NcTalkOutlookAddIn.Settings.AddinSettings
+        NewSettings(string username)
+    {
+        return new NcTalkOutlookAddIn.Settings.AddinSettings
+        {
+            ServerUrl =
+                "https://cloud.example.org/nextcloud",
+            Username = username,
+            AppPassword = "secret"
+        };
+    }
+
+    private static TalkServiceConfiguration NewConfiguration()
+    {
+        NcTalkOutlookAddIn.Settings.AddinSettings settings =
+            NewSettings();
         return new TalkServiceConfiguration(
-            "https://cloud.example.org/nextcloud",
-            login,
-            "secret");
+            settings.ServerUrl,
+            settings.Username,
+            settings.AppPassword);
     }
 
-    private static TalkRoomTrackingSnapshot NewLifecycleSnapshot(
-        TalkServiceConfiguration configuration,
-        string globalId,
-        string roomToken,
-        string entryId)
+    private static TalkRoomLifecycleState LoadLifecycleState(
+        string root,
+        string profile)
     {
-        return new TalkRoomTrackingSnapshot
+        return new TalkRoomLifecycleStore(root, profile).Load();
+    }
+
+    private static TalkRoomLifecycleRecord ReadCoordinatorRecord(
+        TalkRoomLifecycleCoordinator coordinator,
+        string roomToken)
+    {
+        FieldInfo syncRootField =
+            typeof(TalkRoomLifecycleCoordinator).GetField(
+                "_syncRoot",
+                BindingFlags.NonPublic
+                | BindingFlags.Instance);
+        FieldInfo stateField =
+            typeof(TalkRoomLifecycleCoordinator).GetField(
+                "_state",
+                BindingFlags.NonPublic
+                | BindingFlags.Instance);
+        object syncRoot =
+            syncRootField.GetValue(coordinator);
+        lock (syncRoot)
         {
-            Configuration = configuration,
-            GlobalAppointmentId = globalId,
-            RoomToken = roomToken,
-            EntryId = entryId,
-            StoreId = "store",
-            FolderId = "calendar"
-        };
+            TalkRoomLifecycleState state =
+                (TalkRoomLifecycleState)stateField.GetValue(
+                    coordinator);
+            for (int i = 0; i < state.Records.Count; i++)
+            {
+                TalkRoomLifecycleRecord record =
+                    state.Records[i];
+                if (record != null
+                    && string.Equals(
+                        record.RoomToken,
+                        roomToken,
+                        StringComparison.Ordinal))
+                {
+                    return new TalkRoomLifecycleRecord
+                    {
+                        Id = record.Id,
+                        RoomToken = record.RoomToken,
+                        IsEventConversation =
+                            record.IsEventConversation,
+                        ServerBaseUrl =
+                            record.ServerBaseUrl,
+                        AccountLogin = record.AccountLogin,
+                        AccountId = record.AccountId,
+                        PendingDeletion =
+                            record.PendingDeletion,
+                        PolicyRequired =
+                            record.PolicyRequired,
+                        AttemptCount = record.AttemptCount,
+                        NextAttemptUtc =
+                            record.NextAttemptUtc
+                    };
+                }
+            }
+        }
+        return null;
+    }
+
+    private static bool WaitUntil(Func<bool> condition)
+    {
+        DateTime deadline =
+            DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition())
+            {
+                return true;
+            }
+            Thread.Sleep(25);
+        }
+        return condition();
     }
 
     private static void TestSyncCoalescing()
@@ -578,11 +896,15 @@ internal static class TalkIfbLifecycleTests
     $sources = @(
         $testSource,
         (Join-Path $SourceRoot "Services\DurableFileReplace.cs"),
+        (Join-Path $SourceRoot "Services\TalkServiceConfiguration.cs"),
         (Join-Path $SourceRoot "Services\TalkAppointmentSyncCoordinator.cs"),
         (Join-Path $SourceRoot "Services\TalkRoomLifecycleCoordinator.cs"),
         (Join-Path $SourceRoot "Services\TalkRoomLifecycleStore.cs"),
         (Join-Path $SourceRoot "Models\TalkAppointmentSyncSnapshot.cs"),
-        (Join-Path $SourceRoot "Models\TalkRoomLifecycleRecord.cs")
+        (Join-Path $SourceRoot "Models\TalkRoomLifecycleRecord.cs"),
+        (Join-Path $SourceRoot "Utilities\AppDataPaths.cs"),
+        (Join-Path $SourceRoot "Utilities\LogCategories.cs"),
+        (Join-Path $SourceRoot "Utilities\NextcloudUriValidator.cs")
     )
     $exe = Join-Path $TempRoot "TalkIfbLifecycleTests.exe"
     & $csc `

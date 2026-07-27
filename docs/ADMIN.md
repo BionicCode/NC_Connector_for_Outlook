@@ -195,7 +195,7 @@ The app password is stored as `AppPasswordProtected` with Windows Data Protectio
 
 Every successful settings save is written to a validated temporary file in the same directory and then replaces the primary file. The previous valid file remains as `settings_<OutlookProfile>.xml.bak`. If only the protected password is unreadable, NC Connector keeps the other settings, clears the password, and blocks automatic settings writes until the user explicitly saves a corrected configuration.
 
-Pending Talk room cleanup and IFB registry ownership are stored separately per Outlook profile below `%LOCALAPPDATA%\NC4OL\`. These state files use Windows Data Protection and keep a backup next to the primary file. Separate password follow-ups are complete messages saved in the user's Outlook Drafts folder; their private payload property is protected for the current Windows user. Do not copy protected state to another Windows account, and do not delete pending NC Connector password drafts.
+Pending Talk room deletions and IFB registry ownership are stored separately per Outlook profile below `%LOCALAPPDATA%\NC4OL\`. These state files use Windows Data Protection and keep a backup next to the primary file. Separate password follow-ups are complete messages saved in the user's Outlook Drafts folder; their private payload property is protected for the current Windows user. Do not copy protected state to another Windows account, and do not delete pending NC Connector password drafts.
 
 Older `settings.ini` files below these directories are migrated on first start and removed only after a successful migration:
 
@@ -210,7 +210,7 @@ To back up a client profile:
 
 1. Close Outlook.
 2. Copy `settings_*.xml` and `settings_*.xml.bak` from `%LOCALAPPDATA%\NC4OL\`.
-3. If pending Talk room cleanup must survive the backup, copy `talk-room-lifecycle-*.dat*` and `ifb-registry-state-*.dat*` too. They can be restored only for the same Windows user. Pending password follow-ups are part of the Outlook mailbox and are not restored from these files.
+3. If pending Talk room deletions must survive the backup, copy `talk-room-lifecycle-*.dat*` and `ifb-registry-state-*.dat*` too. They can be restored only for the same Windows user. Pending password follow-ups are part of the Outlook mailbox and are not restored from these files.
 4. Record the Windows user and Outlook profile name.
 
 To restore it:
@@ -220,7 +220,7 @@ To restore it:
 3. Start Outlook and run the connection test.
 4. If authentication fails, use the Nextcloud login flow again.
 
-Logs and the IFB address-book cache are operating data, not required for configuration recovery. Omitting the Talk lifecycle files abandons pending Talk-room reconciliation. Password follow-ups survive through their Outlook drafts when the mailbox itself is retained.
+Logs and the IFB address-book cache are operating data, not required for configuration recovery. Omitting the Talk lifecycle files abandons pending Talk-room deletion retries. Password follow-ups survive through their Outlook drafts when the mailbox itself is retained.
 
 ### Rollout and pre-seeding
 
@@ -581,15 +581,20 @@ Separate password delivery requires NC Connector Backend and an active seat.
 
 Deleting a saved Outlook appointment removes its remote Talk room only when the setting is explicitly enabled and the appointment contains NC Connector room metadata. The setting is disabled by default. A Talk URL copied into a location or body is not sufficient for remote deletion.
 
-Tracked appointments and pending room deletions are recorded per Outlook profile. Outlook watches the mounted calendar stores and their calendar subfolders without retaining every appointment as an open COM object. Direct deletion, moving an appointment between watched folders, an Outlook restart, and temporary Nextcloud or store failures are covered by the same delayed reconciliation. A room is queued for remote deletion only after Outlook confirms that the tracked item no longer exists; a temporarily unavailable store keeps the record pending. The cleanup of a newly created room from an unsaved, discarded appointment remains active.
+Deleting one occurrence or an exception from a recurring appointment does not remove the shared room. Only a non-recurring appointment or the series master can queue room deletion.
+
+NC Connector reacts only to Outlook events for the individual Talk appointment. The appointment deletion event queues the room for deletion; this covers deletion from an open appointment and from the calendar view. Outlook startup does not enumerate stores or calendar folders and does not scan calendar items.
+
+Queued room deletions are stored per Outlook profile and retried in the background after temporary Nextcloud failures or an Outlook restart. The cleanup of a newly created room from an unsaved, discarded appointment remains active.
 
 Moderator delegation rejects the current Nextcloud user when the wizard input matches the canonical user ID, the configured login, or the known primary email address. A successful handoff to another user still causes the original moderator to leave the room.
 
 Before enabling saved-appointment room deletion across an organization:
 
-1. Test deletion from every device type used by the pilot account.
-2. Confirm that deleting one synchronized appointment is expected to remove the shared room for all devices.
-3. Document room recovery or recreation procedures for users.
+1. Create and save a Talk appointment with a pilot account.
+2. Delete it from the open appointment and from Outlook's calendar view.
+3. Verify that the remote room is removed in both cases.
+4. Document room recovery or recreation procedures for users.
 
 ## Internet Free/Busy Gateway (IFB)
 

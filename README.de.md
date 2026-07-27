@@ -46,7 +46,7 @@ Weitere Punkte:
 
 Aus einem Outlook-Termin kann direkt ein Nextcloud Talk-Raum erstellt werden. Der Dialog unterstützt Lobby, Passwort, Raumtyp und Moderation.
 
-NC Connector kann Terminänderungen mit dem Raum abgleichen und eingeladene Teilnehmer übernehmen. Das Löschen gespeicherter Talk-Termine entfernt Räume nur nach ausdrücklicher Aktivierung. Die Raumverwaltung erfasst eingebundene Kalenderspeicher und setzt offene Aufgaben nach einem Outlook-Neustart fort.
+NC Connector kann Terminänderungen mit dem Raum abgleichen und eingeladene Teilnehmer übernehmen. Ist die Raumlöschung ausdrücklich aktiviert, stellt Outlooks Termin-Löschereignis den zugehörigen Raum zur Löschung ein. Ausstehende Löschungen werden nach einem Outlook-Neustart fortgesetzt; beim Start werden keine Kalender durchsucht.
 
 ## Signaturen
 

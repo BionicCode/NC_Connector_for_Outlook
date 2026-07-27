@@ -195,7 +195,7 @@ Das App-Passwort wird als `AppPasswordProtected` mit dem Windows-Datenschutz fü
 
 Jeder erfolgreiche Speichervorgang schreibt zunächst eine validierte temporäre Datei im selben Verzeichnis und ersetzt danach die Hauptdatei. Die vorherige gültige Datei bleibt als `settings_<OutlookProfile>.xml.bak` erhalten. Ist nur das geschützte Passwort nicht lesbar, behält NC Connector die übrigen Einstellungen, leert das Passwort und blockiert automatische Settings-Schreibvorgänge, bis der Benutzer eine korrigierte Konfiguration ausdrücklich speichert.
 
-Ausstehende Talk-Raum-Bereinigungen und IFB-Registry-Besitzstände werden getrennt pro Outlook-Profil unter `%LOCALAPPDATA%\NC4OL\` gespeichert. Diese Zustandsdateien verwenden Windows Data Protection und behalten neben der Primärdatei eine Sicherung. Separate Passwort-Follow-ups sind vollständige Nachrichten im Outlook-Entwurfsordner; ihre private Payload-Eigenschaft ist für den aktuellen Windows-Benutzer geschützt. Geschützte Zustände nicht in ein anderes Windows-Konto kopieren und ausstehende NC-Connector-Passwortentwürfe nicht löschen.
+Ausstehende Talk-Raum-Löschungen und IFB-Registry-Besitzstände werden getrennt pro Outlook-Profil unter `%LOCALAPPDATA%\NC4OL\` gespeichert. Diese Zustandsdateien verwenden Windows Data Protection und behalten neben der Primärdatei eine Sicherung. Separate Passwort-Follow-ups sind vollständige Nachrichten im Outlook-Entwurfsordner; ihre private Payload-Eigenschaft ist für den aktuellen Windows-Benutzer geschützt. Geschützte Zustände nicht in ein anderes Windows-Konto kopieren und ausstehende NC-Connector-Passwortentwürfe nicht löschen.
 
 Ältere `settings.ini`-Dateien unter diesen Verzeichnissen werden beim ersten Start migriert und erst nach erfolgreicher Migration entfernt:
 
@@ -210,7 +210,7 @@ So wird ein Client-Profil gesichert:
 
 1. Outlook schließen.
 2. `settings_*.xml` und `settings_*.xml.bak` aus `%LOCALAPPDATA%\NC4OL\` kopieren.
-3. Sollen ausstehende Talk-Raum-Bereinigungen die Sicherung überleben, zusätzlich `talk-room-lifecycle-*.dat*` und `ifb-registry-state-*.dat*` kopieren. Sie können nur für denselben Windows-Benutzer wiederhergestellt werden. Ausstehende Passwort-Follow-ups gehören zum Outlook-Postfach und werden nicht aus diesen Dateien wiederhergestellt.
+3. Sollen ausstehende Talk-Raum-Löschungen die Sicherung überleben, zusätzlich `talk-room-lifecycle-*.dat*` und `ifb-registry-state-*.dat*` kopieren. Sie können nur für denselben Windows-Benutzer wiederhergestellt werden. Ausstehende Passwort-Follow-ups gehören zum Outlook-Postfach und werden nicht aus diesen Dateien wiederhergestellt.
 4. Windows-Benutzer und Outlook-Profilnamen dokumentieren.
 
 So wird es wiederhergestellt:
@@ -220,7 +220,7 @@ So wird es wiederhergestellt:
 3. Outlook starten und den Verbindungstest ausführen.
 4. Bei fehlgeschlagener Authentifizierung den Nextcloud-Login-Flow erneut verwenden.
 
-Logs und der IFB-Adressbuch-Cache sind Betriebsdaten und für die Wiederherstellung der Konfiguration nicht erforderlich. Ohne die Talk-Lifecycle-Dateien geht der ausstehende Talk-Raum-Abgleich verloren. Passwort-Follow-ups bleiben über ihre Outlook-Entwürfe erhalten, wenn das Postfach selbst erhalten bleibt.
+Logs und der IFB-Adressbuch-Cache sind Betriebsdaten und für die Wiederherstellung der Konfiguration nicht erforderlich. Ohne die Talk-Lifecycle-Dateien gehen ausstehende Wiederholungen von Talk-Raum-Löschungen verloren. Passwort-Follow-ups bleiben über ihre Outlook-Entwürfe erhalten, wenn das Postfach selbst erhalten bleibt.
 
 ### Rollout und Vorbelegung
 
@@ -581,15 +581,20 @@ Separate Passwortzustellung benötigt NC Connector Backend und einen aktiven Sea
 
 Das Löschen eines gespeicherten Outlook-Termins entfernt den zugehörigen entfernten Talk-Raum nur, wenn die Einstellung ausdrücklich aktiviert ist und der Termin NC Connector-Raummetadaten enthält. Die Einstellung ist standardmäßig deaktiviert. Ein in Ort oder Nachrichtentext kopierter Talk-Link reicht für eine entfernte Löschung nicht aus.
 
-Verfolgte Termine und ausstehende Raumlöschungen werden pro Outlook-Profil gespeichert. Outlook überwacht die eingebundenen Kalenderspeicher und deren Kalender-Unterordner, ohne jeden Termin als offenes COM-Objekt zu halten. Direkte Löschung, das Verschieben eines Termins zwischen überwachten Ordnern, ein Outlook-Neustart sowie vorübergehende Nextcloud- oder Store-Fehler laufen durch denselben verzögerten Abgleich. Ein Raum wird erst zur entfernten Löschung vorgemerkt, nachdem Outlook bestätigt, dass das verfolgte Element nicht mehr vorhanden ist; ein vorübergehend nicht erreichbarer Store hält den Eintrag offen. Die Bereinigung eines neu erstellten Raums aus einem ungespeicherten und verworfenen Termin bleibt aktiv.
+Das Löschen eines einzelnen Vorkommens oder einer Ausnahme einer Terminserie entfernt den gemeinsamen Raum nicht. Nur ein Nicht-Serientermin oder der Serienmaster kann die Raumlöschung vormerken.
+
+NC Connector reagiert ausschließlich auf Outlook-Ereignisse des jeweiligen Talk-Termins. Das Termin-Löschereignis stellt den Raum zur Löschung ein; dies gilt für die Löschung aus dem geöffneten Termin und aus der Kalenderansicht. Beim Outlook-Start werden weder Stores oder Kalenderordner aufgezählt noch Kalenderelemente durchsucht.
+
+Vorgemerkte Raumlöschungen werden pro Outlook-Profil gespeichert und nach vorübergehenden Nextcloud-Fehlern oder einem Outlook-Neustart im Hintergrund wiederholt. Die Bereinigung eines neu erstellten Raums aus einem ungespeicherten und verworfenen Termin bleibt aktiv.
 
 Die Moderatorübergabe lehnt den aktuellen Nextcloud-Benutzer ab, wenn die Wizard-Eingabe zur kanonischen Benutzer-ID, zum konfigurierten Login oder zur bekannten primären E-Mail-Adresse passt. Nach erfolgreicher Übergabe an eine andere Person verlässt der ursprüngliche Moderator den Raum weiterhin.
 
 Vor der organisationsweiten Aktivierung der Raumlöschung für gespeicherte Termine:
 
-1. Die Löschung von jedem durch das Pilotkonto verwendeten Gerätetyp testen.
-2. Bestätigen, dass das Löschen eines synchronisierten Termins den gemeinsamen Raum für alle Geräte entfernen soll.
-3. Wiederherstellung oder Neuerstellung eines Raums für Benutzer dokumentieren.
+1. Mit einem Pilotkonto einen Talk-Termin erstellen und speichern.
+2. Den Termin aus dem geöffneten Termin und aus Outlooks Kalenderansicht löschen.
+3. Prüfen, dass der entfernte Raum in beiden Fällen gelöscht wird.
+4. Wiederherstellung oder Neuerstellung eines Raums für Benutzer dokumentieren.
 
 ## Internet Free/Busy Gateway (IFB)
 

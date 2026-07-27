@@ -727,10 +727,6 @@ namespace NcTalkOutlookAddIn
                 }
 
                 _subscriptionByEntryId[newEntryId] = subscription;
-                TrackTalkRoomAppointment(
-                    subscription.Appointment,
-                    subscription.RoomToken,
-                    subscription.IsEventConversation);
             }
         }
 
@@ -819,10 +815,6 @@ namespace NcTalkOutlookAddIn
             if (!string.IsNullOrEmpty(entryId))
             {
                 _subscriptionByEntryId[entryId] = subscription;
-                TrackTalkRoomAppointment(
-                    appointment,
-                    normalizedRoomToken,
-                    isEventConversation);
             }
         }
 

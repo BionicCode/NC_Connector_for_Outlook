@@ -26,7 +26,6 @@ namespace NcTalkOutlookAddIn
             private readonly bool _isEventConversation;
             private long? _lastLobbyTimer;
             private bool _roomDeleted;
-            private bool _deleteCandidate;
             private bool _disposed;
             private bool _unsavedCloseCleanupPending;
             private int _unsavedCloseCleanupAttempts;
@@ -69,7 +68,6 @@ namespace NcTalkOutlookAddIn
 
             private void OnWrite(ref bool cancel)
             {
-                _deleteCandidate = false;
                 if (_unsavedCloseCleanupPending)
                 {
                     _unsavedCloseCleanupPending = false;
@@ -127,25 +125,32 @@ namespace NcTalkOutlookAddIn
 
             private void OnBeforeDelete(object item, ref bool cancel)
             {
+                if (cancel)
+                {
+                    LogTalk("BeforeDelete ignored because deletion was already cancelled (token=" + _roomToken + ").");
+                    return;
+                }
+                if (string.IsNullOrWhiteSpace(_roomToken))
+                {
+                    LogTalk("BeforeDelete ignored (no token).");
+                    return;
+                }
                 if (!_owner.IsOrganizer(_appointment))
                 {
                     LogTalk("BeforeDelete ignored (not organizer, token=" + _roomToken + ").");
                     return;
                 }
+                if (!IsRoomDeletionAllowedForRecurrence())
+                {
+                    Dispose();
+                    return;
+                }
 
-                _deleteCandidate = true;
-                _owner.NoteTalkRoomDeletionCandidate();
-                LogTalk("BeforeDelete recorded as a candidate; calendar reconciliation will confirm removal (token=" + _roomToken + ").");
+                QueueSavedTalkRoomDeletion();
             }
 
             private void OnClose(ref bool cancel)
             {
-                if (_deleteCandidate)
-                {
-                    LogTalk("OnClose retained the room pending calendar-level deletion confirmation (token=" + _roomToken + ").");
-                    Dispose();
-                    return;
-                }
                 if (!_owner.IsOrganizer(_appointment))
                 {
                     LogTalk("OnClose without organizer (token=" + _roomToken + ").");
@@ -163,6 +168,36 @@ namespace NcTalkOutlookAddIn
                 }
 
                 LogTalk("OnClose completed (token=" + _roomToken + ", deleted=" + _roomDeleted + ").");
+            }
+
+            private bool IsRoomDeletionAllowedForRecurrence()
+            {
+                try
+                {
+                    Outlook.OlRecurrenceState recurrenceState =
+                        _appointment.RecurrenceState;
+                    if (recurrenceState == Outlook.OlRecurrenceState.olApptNotRecurring
+                        || recurrenceState == Outlook.OlRecurrenceState.olApptMaster)
+                    {
+                        return true;
+                    }
+
+                    LogTalk(
+                        "BeforeDelete retained the room for a recurring occurrence or exception (token="
+                        + _roomToken
+                        + ", recurrenceState="
+                        + recurrenceState
+                        + ").");
+                    return false;
+                }
+                catch (COMException ex)
+                {
+                    DiagnosticsLogger.LogException(
+                        LogCategories.Talk,
+                        "BeforeDelete retained the room because Outlook did not expose the recurrence state.",
+                        ex);
+                    return false;
+                }
             }
 
             private void ScheduleUnsavedCloseCleanup()
@@ -512,14 +547,52 @@ namespace NcTalkOutlookAddIn
                     Dispose();
                     return;
                 }
-                _owner.QueueUnsavedTalkRoomDeletion(
+                bool queued = _owner.QueueUnsavedTalkRoomDeletion(
                     _roomToken,
                     _isEventConversation);
                 _owner._talkAppointmentController.ClearTalkProperties(
                     _appointment);
                 _roomDeleted = true;
                 LogTalk(
-                    "EnsureRoomDeleted queued persistent cleanup (token="
+                    (queued
+                        ? "EnsureRoomDeleted queued persistent cleanup (token="
+                        : "EnsureRoomDeleted could not queue persistent cleanup (token=")
+                    + _roomToken
+                    + ").");
+                Dispose();
+            }
+
+            private void QueueSavedTalkRoomDeletion()
+            {
+                if (_roomDeleted || string.IsNullOrWhiteSpace(_roomToken))
+                {
+                    return;
+                }
+
+                string delegateId;
+                if (_owner._talkAppointmentController.IsDelegatedToOtherUser(
+                        _appointment,
+                        out delegateId))
+                {
+                    LogTalk(
+                        "Saved-event room deletion skipped (delegation="
+                        + delegateId
+                        + ", token="
+                        + _roomToken
+                        + ").");
+                    _roomDeleted = true;
+                    Dispose();
+                    return;
+                }
+
+                _roomDeleted = true;
+                bool queued = _owner.QueueSavedTalkRoomDeletion(
+                    _roomToken,
+                    _isEventConversation);
+                LogTalk(
+                    (queued
+                        ? "BeforeDelete queued persistent room deletion (token="
+                        : "BeforeDelete could not queue persistent room deletion (token=")
                     + _roomToken
                     + ").");
                 Dispose();
@@ -555,16 +628,6 @@ namespace NcTalkOutlookAddIn
             internal string EntryId
             {
                 get { return _entryId; }
-            }
-
-            internal string RoomToken
-            {
-                get { return _roomToken; }
-            }
-
-            internal bool IsEventConversation
-            {
-                get { return _isEventConversation; }
             }
 
             internal bool IsFor(Outlook.AppointmentItem appointment)
@@ -619,6 +682,39 @@ namespace NcTalkOutlookAddIn
                 _entryId = entryId;
                 LogTalk("Subscription EntryId updated (token=" + _roomToken + ", EntryId=" + (_entryId ?? "n/a") + ").");
             }
+        }
+
+        private void DisposeTalkAppointmentSubscriptions()
+        {
+            var subscriptions =
+                new AppointmentSubscription[
+                    _activeSubscriptions.Count];
+            _activeSubscriptions.Values.CopyTo(
+                subscriptions,
+                0);
+            for (int i = 0; i < subscriptions.Length; i++)
+            {
+                AppointmentSubscription subscription =
+                    subscriptions[i];
+                if (subscription == null)
+                {
+                    continue;
+                }
+                try
+                {
+                    subscription.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticsLogger.LogException(
+                        LogCategories.Talk,
+                        "Failed to dispose an appointment subscription during add-in teardown.",
+                        ex);
+                }
+            }
+            _activeSubscriptions.Clear();
+            _subscriptionByToken.Clear();
+            _subscriptionByEntryId.Clear();
         }
 
     }

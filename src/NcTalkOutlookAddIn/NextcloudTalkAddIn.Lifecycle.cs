@@ -52,7 +52,6 @@ namespace NcTalkOutlookAddIn
                 outlookProfileName);
             EnsureApplicationHook();
             EnsureInspectorHook();
-            StartTalkRoomLifecycleRecovery();
             ApplyIfbSettings();
             StartUpdateCheckIfDue();
         }
@@ -274,6 +273,7 @@ namespace NcTalkOutlookAddIn
             UnhookMailComposeSubscriptions();
             DisposeComposeLifecycle();
             DisposeTalkAppointmentSync();
+            DisposeTalkAppointmentSubscriptions();
             DisposeTalkRoomLifecycle();
             if (_freeBusyManager != null && _currentSettings != null && _currentSettings.IfbEnabled)
             {

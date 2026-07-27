@@ -11,17 +11,16 @@ using NcTalkOutlookAddIn.Utilities;
 
 namespace NcTalkOutlookAddIn.Services
 {
-    // Owns the compact active-room index, absence confirmation and durable retries.
+    // Persists requested Talk room deletions and retries failed requests.
     internal sealed class TalkRoomLifecycleCoordinator : IDisposable
     {
-        private static readonly TimeSpan MissingConfirmationDelay =
-            TimeSpan.FromSeconds(30);
-
         private readonly object _syncRoot = new object();
         private readonly TalkRoomLifecycleStore _store;
         private readonly TalkRoomLifecycleState _state;
         private readonly Func<AddinSettings> _getCurrentSettings;
         private readonly Func<bool> _isSavedEventDeletionEnabled;
+        private readonly Func<TalkServiceConfiguration, string> _resolveAccountId;
+        private readonly Action<TalkServiceConfiguration, string, bool> _deleteRoom;
         private readonly Timer _timer;
         private int _workerRunning;
         private bool _disposed;
@@ -31,6 +30,24 @@ namespace NcTalkOutlookAddIn.Services
             string profileScope,
             Func<AddinSettings> getCurrentSettings,
             Func<bool> isSavedEventDeletionEnabled)
+            : this(
+                dataDirectory,
+                profileScope,
+                getCurrentSettings,
+                isSavedEventDeletionEnabled,
+                configuration => NextcloudUserIdentityService.ResolveCurrentUserId(configuration),
+                (configuration, roomToken, isEventConversation) =>
+                    new TalkService(configuration).DeleteRoom(roomToken, isEventConversation))
+        {
+        }
+
+        internal TalkRoomLifecycleCoordinator(
+            string dataDirectory,
+            string profileScope,
+            Func<AddinSettings> getCurrentSettings,
+            Func<bool> isSavedEventDeletionEnabled,
+            Func<TalkServiceConfiguration, string> resolveAccountId,
+            Action<TalkServiceConfiguration, string, bool> deleteRoom)
         {
             if (getCurrentSettings == null)
             {
@@ -40,6 +57,14 @@ namespace NcTalkOutlookAddIn.Services
             {
                 throw new ArgumentNullException("isSavedEventDeletionEnabled");
             }
+            if (resolveAccountId == null)
+            {
+                throw new ArgumentNullException("resolveAccountId");
+            }
+            if (deleteRoom == null)
+            {
+                throw new ArgumentNullException("deleteRoom");
+            }
 
             _store = new TalkRoomLifecycleStore(dataDirectory, profileScope);
             _state = _store.Load() ?? new TalkRoomLifecycleState();
@@ -47,28 +72,12 @@ namespace NcTalkOutlookAddIn.Services
             {
                 _state.Records = new List<TalkRoomLifecycleRecord>();
             }
-            if (_state.SafetyVersion < 2)
-            {
-                for (int i = 0; i < _state.Records.Count; i++)
-                {
-                    TalkRoomLifecycleRecord record = _state.Records[i];
-                    if (record != null
-                        && record.PendingDeletion
-                        && record.PolicyRequired)
-                    {
-                        ResetMissing(record);
-                    }
-                }
-                _state.SafetyVersion = 2;
-                _store.Save(_state);
-            }
+            DiscardTrackingRecords();
             _getCurrentSettings = getCurrentSettings;
             _isSavedEventDeletionEnabled = isSavedEventDeletionEnabled;
-            _timer = new Timer(
-                OnTimer,
-                null,
-                Timeout.Infinite,
-                Timeout.Infinite);
+            _resolveAccountId = resolveAccountId;
+            _deleteRoom = deleteRoom;
+            _timer = new Timer(OnTimer, null, Timeout.Infinite, Timeout.Infinite);
         }
 
         internal void StartPendingProcessing()
@@ -76,150 +85,66 @@ namespace NcTalkOutlookAddIn.Services
             ScheduleNext();
         }
 
-        internal void Track(TalkRoomTrackingSnapshot snapshot)
-        {
-            if (!IsUsable(snapshot))
-            {
-                return;
-            }
-
-            try
-            {
-                string baseUrl = NormalizeBaseUrl(snapshot.Configuration);
-                string login = NormalizeLogin(snapshot.Configuration);
-                lock (_syncRoot)
-                {
-                    TalkRoomLifecycleRecord record =
-                        FindSnapshotLocked(
-                            snapshot,
-                            baseUrl,
-                            login,
-                            string.Empty);
-                    if (record == null)
-                    {
-                        record = NewRecord(baseUrl, login, string.Empty);
-                    }
-                    ApplySnapshot(record, snapshot);
-                    ResetMissing(record);
-                    SaveLocked();
-                }
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLogger.LogException(
-                    LogCategories.Talk,
-                    "Talk room lifecycle tracking failed.",
-                    ex);
-            }
-        }
-
-        internal TalkRoomReconcileResult ReconcileSuccessfulScan(
-            TalkServiceConfiguration configuration,
-            IList<TalkRoomTrackingSnapshot> snapshots,
-            DateTime nowUtc)
-        {
-            var result = new TalkRoomReconcileResult();
-            if (configuration == null
-                || !configuration.IsComplete()
-                || snapshots == null)
-            {
-                return result;
-            }
-
-            string accountId;
-            try
-            {
-                accountId =
-                    NextcloudUserIdentityService.ResolveCurrentUserId(
-                        configuration);
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLogger.LogException(
-                    LogCategories.Talk,
-                    "Talk lifecycle scan retained all rooms because the account could not be verified.",
-                    ex);
-                return result;
-            }
-            if (string.IsNullOrWhiteSpace(accountId))
-            {
-                return result;
-            }
-
-            string baseUrl = NormalizeBaseUrl(configuration);
-            string login = NormalizeLogin(configuration);
-            lock (_syncRoot)
-            {
-                UpsertPresentSnapshotsLocked(
-                    snapshots,
-                    baseUrl,
-                    login,
-                    accountId);
-                ConfirmMissingRecordsLocked(
-                    snapshots,
-                    baseUrl,
-                    login,
-                    accountId,
-                    nowUtc,
-                    result);
-                SaveLocked();
-            }
-            if (result.ConfirmedDeletionCount > 0)
-            {
-                Signal();
-            }
-            return result;
-        }
-
-        internal void QueueUnconditionalDeletion(
+        internal bool QueueDeletion(
             string roomToken,
             bool isEventConversation,
-            TalkServiceConfiguration configuration)
+            TalkServiceConfiguration configuration,
+            bool policyRequired)
         {
             if (string.IsNullOrWhiteSpace(roomToken)
                 || configuration == null
                 || !configuration.IsComplete())
             {
-                return;
+                return false;
             }
 
             try
             {
-                var snapshot = new TalkRoomTrackingSnapshot
-                {
-                    RoomToken = roomToken.Trim(),
-                    IsEventConversation = isEventConversation,
-                    Configuration = configuration
-                };
+                string normalizedToken = roomToken.Trim();
                 string baseUrl = NormalizeBaseUrl(configuration);
                 string login = NormalizeLogin(configuration);
                 lock (_syncRoot)
                 {
                     TalkRoomLifecycleRecord record =
-                        FindSnapshotLocked(
-                            snapshot,
-                            baseUrl,
-                            login,
-                            string.Empty);
+                        FindPendingDeletionLocked(normalizedToken, baseUrl, login);
                     if (record == null)
                     {
-                        record = NewRecord(baseUrl, login, string.Empty);
+                        record = new TalkRoomLifecycleRecord
+                        {
+                            RoomToken = normalizedToken,
+                            IsEventConversation = isEventConversation,
+                            ServerBaseUrl = baseUrl,
+                            AccountLogin = login,
+                            PendingDeletion = true,
+                            PolicyRequired = policyRequired
+                        };
+                        _state.Records.Add(record);
                     }
-                    ApplySnapshot(record, snapshot);
-                    record.PendingDeletion = true;
-                    record.PolicyRequired = false;
+                    else
+                    {
+                        record.IsEventConversation = isEventConversation;
+                        record.PendingDeletion = true;
+                        record.PolicyRequired = record.PolicyRequired && policyRequired;
+                    }
+
                     record.AttemptCount = 0;
                     record.NextAttemptUtc = DateTime.UtcNow;
                     SaveLocked();
                 }
-                Signal();
+
+                DiagnosticsLogger.Log(
+                    LogCategories.Talk,
+                    "Talk room deletion queued (policyRequired=" + policyRequired + ").");
+                Schedule(TimeSpan.Zero);
+                return true;
             }
             catch (Exception ex)
             {
                 DiagnosticsLogger.LogException(
                     LogCategories.Talk,
-                    "Talk room cleanup could not be queued.",
+                    "Talk room deletion could not be queued.",
                     ex);
+                return false;
             }
         }
 
@@ -230,273 +155,63 @@ namespace NcTalkOutlookAddIn.Services
             string accountId)
         {
             if (record == null
-                || !string.Equals(
-                    record.ServerBaseUrl,
-                    baseUrl,
-                    StringComparison.OrdinalIgnoreCase))
+                || !string.Equals(record.ServerBaseUrl, baseUrl, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
             return !string.IsNullOrWhiteSpace(record.AccountId)
-                ? string.Equals(
-                    record.AccountId,
-                    accountId,
-                    StringComparison.Ordinal)
-                : string.Equals(
-                    record.AccountLogin,
-                    login,
-                    StringComparison.OrdinalIgnoreCase);
+                ? string.Equals(record.AccountId, accountId, StringComparison.Ordinal)
+                : string.Equals(record.AccountLogin, login, StringComparison.OrdinalIgnoreCase);
         }
 
-        private void UpsertPresentSnapshotsLocked(
-            IList<TalkRoomTrackingSnapshot> snapshots,
-            string baseUrl,
-            string login,
-            string accountId)
+        private void DiscardTrackingRecords()
         {
-            for (int i = 0; i < snapshots.Count; i++)
+            int removed = _state.Records.RemoveAll(
+                record => record == null || !record.PendingDeletion);
+            if (removed <= 0)
             {
-                TalkRoomTrackingSnapshot snapshot = snapshots[i];
-                if (!IsUsable(snapshot)
-                    || !string.Equals(
-                        NormalizeBaseUrl(snapshot.Configuration),
-                        baseUrl,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+                return;
+            }
 
-                TalkRoomLifecycleRecord record =
-                    FindSnapshotLocked(
-                        snapshot,
-                        baseUrl,
-                        login,
-                        accountId);
-                if (record == null)
-                {
-                    record = NewRecord(baseUrl, login, accountId);
-                }
-                else if (string.Equals(
-                             record.AccountId,
-                             accountId,
-                             StringComparison.Ordinal)
-                         || (string.IsNullOrWhiteSpace(record.AccountId)
-                             && string.Equals(
-                                 record.AccountLogin,
-                                 login,
-                                 StringComparison.OrdinalIgnoreCase)))
-                {
-                    record.AccountId = accountId;
-                    record.AccountLogin = login;
-                }
-                ApplySnapshot(record, snapshot);
-                ResetMissing(record);
+            try
+            {
+                _store.Save(_state);
+                DiagnosticsLogger.Log(
+                    LogCategories.Talk,
+                    "Removed " + removed + " obsolete Talk room tracking records.");
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLogger.LogException(
+                    LogCategories.Talk,
+                    "Obsolete Talk room tracking records could not be removed from the persisted queue.",
+                    ex);
             }
         }
 
-        private void ConfirmMissingRecordsLocked(
-            IList<TalkRoomTrackingSnapshot> snapshots,
+        private TalkRoomLifecycleRecord FindPendingDeletionLocked(
+            string roomToken,
             string baseUrl,
-            string login,
-            string accountId,
-            DateTime nowUtc,
-            TalkRoomReconcileResult result)
+            string login)
         {
             for (int i = 0; i < _state.Records.Count; i++)
             {
                 TalkRoomLifecycleRecord record = _state.Records[i];
-                if (record == null
-                    || record.PendingDeletion
-                    || !MatchesAccount(
-                        record,
-                        baseUrl,
-                        login,
-                        accountId)
-                    || IsPresent(record, snapshots, baseUrl))
-                {
-                    continue;
-                }
-
-                if (record.MissingConfirmationCount <= 0)
-                {
-                    record.MissingConfirmationCount = 1;
-                    record.FirstMissingUtc = nowUtc;
-                }
-                DateTime confirmationUtc =
-                    record.FirstMissingUtc.Add(
-                        MissingConfirmationDelay);
-                if (nowUtc < confirmationUtc)
-                {
-                    result.NeedsFollowUp = true;
-                    if (result.NextConfirmationUtc <= DateTime.MinValue
-                        || confirmationUtc < result.NextConfirmationUtc)
-                    {
-                        result.NextConfirmationUtc = confirmationUtc;
-                    }
-                    continue;
-                }
-
-                record.MissingConfirmationCount++;
-                record.PendingDeletion = true;
-                record.PolicyRequired = true;
-                record.AttemptCount = 0;
-                record.NextAttemptUtc = nowUtc;
-                result.ConfirmedDeletionCount++;
-            }
-        }
-
-        private static bool IsPresent(
-            TalkRoomLifecycleRecord record,
-            IList<TalkRoomTrackingSnapshot> snapshots,
-            string baseUrl)
-        {
-            for (int i = 0; i < snapshots.Count; i++)
-            {
-                TalkRoomTrackingSnapshot snapshot = snapshots[i];
-                if (snapshot == null
-                    || snapshot.Configuration == null
-                    || !string.Equals(
-                        NormalizeBaseUrl(snapshot.Configuration),
-                        baseUrl,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-                if (!string.IsNullOrWhiteSpace(record.GlobalAppointmentId)
-                    && string.Equals(
-                        record.GlobalAppointmentId,
-                        snapshot.GlobalAppointmentId,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-                if (!string.IsNullOrWhiteSpace(snapshot.RoomToken)
-                    && string.Equals(
-                        record.RoomToken,
-                        snapshot.RoomToken,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private TalkRoomLifecycleRecord FindSnapshotLocked(
-            TalkRoomTrackingSnapshot snapshot,
-            string baseUrl,
-            string login,
-            string accountId)
-        {
-            TalkRoomLifecycleRecord loginFallback = null;
-            for (int i = 0; i < _state.Records.Count; i++)
-            {
-                TalkRoomLifecycleRecord record = _state.Records[i];
-                if (record == null
-                    || !string.Equals(
-                        record.ServerBaseUrl,
-                        baseUrl,
-                        StringComparison.OrdinalIgnoreCase)
-                    || !HasSameAppointment(record, snapshot))
-                {
-                    continue;
-                }
-                if (!string.IsNullOrWhiteSpace(accountId)
-                    && string.Equals(
-                        record.AccountId,
-                        accountId,
-                        StringComparison.Ordinal))
+                if (record != null
+                    && record.PendingDeletion
+                    && string.Equals(record.RoomToken, roomToken, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(record.ServerBaseUrl, baseUrl, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(record.AccountLogin, login, StringComparison.OrdinalIgnoreCase))
                 {
                     return record;
                 }
-                if (string.Equals(
-                        record.AccountLogin,
-                        login,
-                        StringComparison.OrdinalIgnoreCase)
-                    && (string.IsNullOrWhiteSpace(accountId)
-                        || string.IsNullOrWhiteSpace(record.AccountId)))
-                {
-                    loginFallback = record;
-                }
             }
-            return loginFallback;
-        }
-
-        private static bool HasSameAppointment(
-            TalkRoomLifecycleRecord record,
-            TalkRoomTrackingSnapshot snapshot)
-        {
-            if (!string.IsNullOrWhiteSpace(snapshot.GlobalAppointmentId)
-                && string.Equals(
-                    record.GlobalAppointmentId,
-                    snapshot.GlobalAppointmentId,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-            if (string.Equals(
-                    record.RoomToken,
-                    snapshot.RoomToken,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-            return !string.IsNullOrWhiteSpace(snapshot.EntryId)
-                   && string.Equals(
-                       record.EntryId,
-                       snapshot.EntryId,
-                       StringComparison.OrdinalIgnoreCase)
-                   && string.Equals(
-                       record.StoreId,
-                       snapshot.StoreId,
-                       StringComparison.OrdinalIgnoreCase);
-        }
-
-        private TalkRoomLifecycleRecord NewRecord(
-            string baseUrl,
-            string login,
-            string accountId)
-        {
-            var record = new TalkRoomLifecycleRecord
-            {
-                ServerBaseUrl = baseUrl,
-                AccountLogin = login,
-                AccountId = accountId ?? string.Empty
-            };
-            _state.Records.Add(record);
-            return record;
-        }
-
-        private static void ApplySnapshot(
-            TalkRoomLifecycleRecord record,
-            TalkRoomTrackingSnapshot snapshot)
-        {
-            record.EntryId = snapshot.EntryId ?? string.Empty;
-            record.StoreId = snapshot.StoreId ?? string.Empty;
-            record.FolderId = snapshot.FolderId ?? string.Empty;
-            record.GlobalAppointmentId =
-                snapshot.GlobalAppointmentId ?? string.Empty;
-            record.RoomToken = snapshot.RoomToken.Trim();
-            record.IsEventConversation = snapshot.IsEventConversation;
-        }
-
-        private static void ResetMissing(
-            TalkRoomLifecycleRecord record)
-        {
-            record.MissingConfirmationCount = 0;
-            record.FirstMissingUtc = DateTime.MinValue;
-            record.PendingDeletion = false;
-            record.PolicyRequired = false;
-            record.AttemptCount = 0;
-            record.NextAttemptUtc = DateTime.MinValue;
+            return null;
         }
 
         private void OnTimer(object state)
         {
-            if (Interlocked.CompareExchange(
-                    ref _workerRunning,
-                    1,
-                    0) != 0)
+            if (Interlocked.CompareExchange(ref _workerRunning, 1, 0) != 0)
             {
                 return;
             }
@@ -520,85 +235,110 @@ namespace NcTalkOutlookAddIn.Services
 
         private void ProcessDueRecords()
         {
-            List<TalkRoomLifecycleRecord> due =
-                GetDueRecords(DateTime.UtcNow);
+            List<TalkRoomLifecycleRecord> due = GetDueRecords(DateTime.UtcNow);
             if (due.Count == 0)
             {
                 return;
             }
 
-            TalkServiceConfiguration configuration =
-                BuildConfiguration(_getCurrentSettings());
-            string accountId = string.Empty;
-            if (configuration != null)
+            TalkServiceConfiguration configuration = BuildConfiguration(_getCurrentSettings());
+            if (configuration == null)
             {
-                try
-                {
-                    accountId =
-                        NextcloudUserIdentityService.ResolveCurrentUserId(
-                            configuration);
-                }
-                catch (Exception ex)
-                {
-                    DiagnosticsLogger.LogException(
-                        LogCategories.Talk,
-                        "Talk room deletion retained because the account could not be verified.",
-                        ex);
-                }
+                RescheduleAll(due, TimeSpan.FromHours(1));
+                return;
+            }
+
+            string accountId;
+            try
+            {
+                accountId = _resolveAccountId(configuration);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLogger.LogException(
+                    LogCategories.Talk,
+                    "Talk room deletions retained because the account could not be verified.",
+                    ex);
+                RescheduleAll(due, TimeSpan.FromHours(1));
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(accountId))
+            {
+                RescheduleAll(due, TimeSpan.FromHours(1));
+                return;
             }
 
             string baseUrl = NormalizeBaseUrl(configuration);
             string login = NormalizeLogin(configuration);
+            bool policyChecked = false;
+            bool policyAvailable = true;
+            bool policyEnabled = false;
             for (int i = 0; i < due.Count; i++)
             {
                 TalkRoomLifecycleRecord record = due[i];
-                if (configuration == null
-                    || string.IsNullOrWhiteSpace(accountId)
-                    || !MatchesAccount(
-                        record,
-                        baseUrl,
-                        login,
-                        accountId))
+                if (!MatchesAccount(record, baseUrl, login, accountId))
                 {
                     Reschedule(record.Id, TimeSpan.FromHours(1));
                     continue;
                 }
-                if (record.PolicyRequired
-                    && !_isSavedEventDeletionEnabled())
+                BindAccountId(record.Id, accountId);
+
+                if (record.PolicyRequired)
                 {
-                    Remove(record.Id);
-                    continue;
-                }
-                if (!IsStillPending(record.Id))
-                {
-                    continue;
+                    if (!policyChecked)
+                    {
+                        policyChecked = true;
+                        try
+                        {
+                            policyEnabled = _isSavedEventDeletionEnabled();
+                        }
+                        catch (Exception ex)
+                        {
+                            policyAvailable = false;
+                            DiagnosticsLogger.LogException(
+                                LogCategories.Talk,
+                                "Saved-event room deletion policy could not be evaluated.",
+                                ex);
+                        }
+                    }
+                    if (!policyAvailable)
+                    {
+                        Reschedule(record.Id, TimeSpan.FromHours(1));
+                        continue;
+                    }
+                    if (!policyEnabled)
+                    {
+                        Remove(record.Id);
+                        DiagnosticsLogger.Log(
+                            LogCategories.Talk,
+                            "Saved-event room deletion skipped because the setting is disabled.");
+                        continue;
+                    }
                 }
 
                 try
                 {
-                    new TalkService(configuration).DeleteRoom(
+                    _deleteRoom(
+                        configuration,
                         record.RoomToken,
                         record.IsEventConversation);
                     Remove(record.Id);
                     DiagnosticsLogger.Log(
                         LogCategories.Talk,
-                        "Confirmed Talk room deletion completed.");
+                        "Queued Talk room deletion completed.");
                 }
                 catch (Exception ex)
                 {
                     DiagnosticsLogger.LogException(
                         LogCategories.Talk,
-                        "Confirmed Talk room deletion failed.",
+                        "Queued Talk room deletion failed.",
                         ex);
-                    Reschedule(
-                        record.Id,
-                        GetRetryDelay(record.AttemptCount + 1));
+                    Reschedule(record.Id, GetRetryDelay(record.AttemptCount + 1));
                 }
             }
         }
 
-        private List<TalkRoomLifecycleRecord> GetDueRecords(
-            DateTime nowUtc)
+        private List<TalkRoomLifecycleRecord> GetDueRecords(DateTime nowUtc)
         {
             var result = new List<TalkRoomLifecycleRecord>();
             lock (_syncRoot)
@@ -618,12 +358,29 @@ namespace NcTalkOutlookAddIn.Services
             return result;
         }
 
-        private bool IsStillPending(string recordId)
+        private void RescheduleAll(
+            IList<TalkRoomLifecycleRecord> records,
+            TimeSpan delay)
+        {
+            for (int i = 0; i < records.Count; i++)
+            {
+                Reschedule(records[i].Id, delay);
+            }
+        }
+
+        private void BindAccountId(string recordId, string accountId)
         {
             lock (_syncRoot)
             {
                 TalkRoomLifecycleRecord record = FindByIdLocked(recordId);
-                return record != null && record.PendingDeletion;
+                if (record == null
+                    || !record.PendingDeletion
+                    || string.Equals(record.AccountId, accountId, StringComparison.Ordinal))
+                {
+                    return;
+                }
+                record.AccountId = accountId;
+                SaveLocked();
             }
         }
 
@@ -662,20 +419,12 @@ namespace NcTalkOutlookAddIn.Services
             {
                 TalkRoomLifecycleRecord record = _state.Records[i];
                 if (record != null
-                    && string.Equals(
-                        record.Id,
-                        recordId,
-                        StringComparison.Ordinal))
+                    && string.Equals(record.Id, recordId, StringComparison.Ordinal))
                 {
                     return record;
                 }
             }
             return null;
-        }
-
-        private void Signal()
-        {
-            Schedule(TimeSpan.Zero);
         }
 
         private void ScheduleNext()
@@ -694,10 +443,9 @@ namespace NcTalkOutlookAddIn.Services
                     {
                         continue;
                     }
-                    DateTime due =
-                        record.NextAttemptUtc <= DateTime.MinValue
-                            ? DateTime.UtcNow
-                            : record.NextAttemptUtc;
+                    DateTime due = record.NextAttemptUtc <= DateTime.MinValue
+                        ? DateTime.UtcNow
+                        : record.NextAttemptUtc;
                     if (!earliest.HasValue || due < earliest.Value)
                     {
                         earliest = due;
@@ -721,15 +469,12 @@ namespace NcTalkOutlookAddIn.Services
                 }
                 int milliseconds = delay <= TimeSpan.Zero
                     ? 0
-                    : (int)Math.Min(
-                        int.MaxValue,
-                        Math.Ceiling(delay.TotalMilliseconds));
+                    : (int)Math.Min(int.MaxValue, Math.Ceiling(delay.TotalMilliseconds));
                 _timer.Change(milliseconds, Timeout.Infinite);
             }
         }
 
-        private static TalkServiceConfiguration BuildConfiguration(
-            AddinSettings settings)
+        private static TalkServiceConfiguration BuildConfiguration(AddinSettings settings)
         {
             if (settings == null)
             {
@@ -742,29 +487,18 @@ namespace NcTalkOutlookAddIn.Services
             return configuration.IsComplete() ? configuration : null;
         }
 
-        private static string NormalizeBaseUrl(
-            TalkServiceConfiguration configuration)
+        private static string NormalizeBaseUrl(TalkServiceConfiguration configuration)
         {
             return configuration == null
                 ? string.Empty
                 : configuration.GetNormalizedBaseUrl().TrimEnd('/');
         }
 
-        private static string NormalizeLogin(
-            TalkServiceConfiguration configuration)
+        private static string NormalizeLogin(TalkServiceConfiguration configuration)
         {
             return configuration == null
                 ? string.Empty
                 : (configuration.Username ?? string.Empty).Trim();
-        }
-
-        private static bool IsUsable(
-            TalkRoomTrackingSnapshot snapshot)
-        {
-            return snapshot != null
-                   && !string.IsNullOrWhiteSpace(snapshot.RoomToken)
-                   && snapshot.Configuration != null
-                   && snapshot.Configuration.IsComplete();
         }
 
         private static TimeSpan GetRetryDelay(int attempt)

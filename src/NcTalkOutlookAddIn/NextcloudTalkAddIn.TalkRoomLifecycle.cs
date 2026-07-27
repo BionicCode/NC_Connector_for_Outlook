@@ -2,17 +2,12 @@
 // Licensed under the GNU Affero General Public License v3.0.
 // See LICENSE.txt for details.
 
-using System;
-using System.Threading.Tasks;
-using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Services;
 using NcTalkOutlookAddIn.Settings;
-using NcTalkOutlookAddIn.Utilities;
-using Outlook = Microsoft.Office.Interop.Outlook;
 
 namespace NcTalkOutlookAddIn
 {
-    // Connects Outlook appointments to the compact persistent room index.
+    // Persists requested Talk room deletions without enumerating Outlook calendars.
     public sealed partial class NextcloudTalkAddIn
     {
         private TalkRoomLifecycleCoordinator
@@ -33,33 +28,30 @@ namespace NcTalkOutlookAddIn
             _talkRoomLifecycleCoordinator.StartPendingProcessing();
         }
 
-        internal void TrackTalkRoomAppointment(
-            Outlook.AppointmentItem appointment,
+        internal bool QueueSavedTalkRoomDeletion(
             string roomToken,
             bool isEventConversation)
         {
-            TalkRoomLifecycleCoordinator coordinator =
-                _talkRoomLifecycleCoordinator;
-            if (coordinator == null)
-            {
-                return;
-            }
-
-            TalkRoomTrackingSnapshot snapshot =
-                _talkAppointmentController.CaptureTrackingSnapshot(
-                    appointment,
-                    roomToken,
-                    isEventConversation);
-            if (snapshot != null
-                && !string.IsNullOrWhiteSpace(snapshot.EntryId))
-            {
-                coordinator.Track(snapshot);
-            }
+            return QueueTalkRoomDeletion(
+                roomToken,
+                isEventConversation,
+                true);
         }
 
-        internal void QueueUnsavedTalkRoomDeletion(
+        internal bool QueueUnsavedTalkRoomDeletion(
             string roomToken,
             bool isEventConversation)
+        {
+            return QueueTalkRoomDeletion(
+                roomToken,
+                isEventConversation,
+                false);
+        }
+
+        private bool QueueTalkRoomDeletion(
+            string roomToken,
+            bool isEventConversation,
+            bool policyRequired)
         {
             TalkRoomLifecycleCoordinator coordinator =
                 _talkRoomLifecycleCoordinator;
@@ -68,33 +60,21 @@ namespace NcTalkOutlookAddIn
                 : null;
             if (coordinator == null || settings == null)
             {
-                return;
+                return false;
             }
 
-            coordinator.QueueUnconditionalDeletion(
+            return coordinator.QueueDeletion(
                 roomToken,
                 isEventConversation,
                 new TalkServiceConfiguration(
                     settings.ServerUrl,
                     settings.Username,
-                    settings.AppPassword));
-        }
-
-        private void StartTalkRoomLifecycleRecovery()
-        {
-            Task recovery = RunOnOutlookUiThreadAsync(
-                () => EnsureTalkCalendarLifecycleMonitor(true));
-            recovery.ContinueWith(
-                task => DiagnosticsLogger.LogException(
-                    LogCategories.Talk,
-                    "Talk room lifecycle recovery failed.",
-                    task.Exception),
-                TaskContinuationOptions.OnlyOnFaulted);
+                    settings.AppPassword),
+                policyRequired);
         }
 
         private void DisposeTalkRoomLifecycle()
         {
-            DisposeTalkCalendarLifecycleMonitor();
             TalkRoomLifecycleCoordinator coordinator =
                 _talkRoomLifecycleCoordinator;
             _talkRoomLifecycleCoordinator = null;

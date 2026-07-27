@@ -45,7 +45,7 @@ Key points:
 
 An Outlook appointment can create a Nextcloud Talk room directly. The dialog supports lobby, password, room type, and moderation.
 
-NC Connector can sync appointment changes back to the room and add invited attendees. Deleting saved Talk appointments removes rooms only when this behavior is explicitly enabled. Room maintenance covers mounted calendar stores and resumes pending work after an Outlook restart.
+NC Connector can sync appointment changes back to the room and add invited attendees. When room deletion is explicitly enabled, Outlook's appointment deletion event queues the associated room for removal. Pending removals resume after an Outlook restart; startup does not scan calendars.
 
 ## Signatures
 
