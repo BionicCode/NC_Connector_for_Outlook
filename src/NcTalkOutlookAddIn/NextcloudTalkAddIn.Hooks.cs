@@ -41,20 +41,20 @@ namespace NcTalkOutlookAddIn
             }
             try
             {
-                EnsureExplorerInlineResponseHooks();
+                EnsureExplorerHooks();
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.LogException(LogCategories.Core, "Failed to hook Explorer inline-response lifecycle.", ex);
+                DiagnosticsLogger.LogException(LogCategories.Core, "Failed to hook Explorer lifecycle.", ex);
             }
         }
 
         private void UnhookApplication()
         {
-            UnhookExplorerInlineResponseHooks();
+            UnhookExplorerHooks();
         }
 
-        private void EnsureExplorerInlineResponseHooks()
+        private void EnsureExplorerHooks()
         {
             if (_outlookApplication == null)
             {
@@ -78,11 +78,17 @@ namespace NcTalkOutlookAddIn
                         try
                         {
                             explorer = _explorers[i];
-                            HookInlineResponseExplorer(explorer);
+                            if (!HookExplorer(explorer))
+                            {
+                                ComInteropScope.TryRelease(
+                                    explorer,
+                                    LogCategories.Core,
+                                    "Failed to release an untracked existing Explorer.");
+                            }
                         }
                         catch (Exception ex)
                         {
-                            DiagnosticsLogger.LogException(LogCategories.Core, "Failed to hook existing Explorer inline-response lifecycle.", ex);
+                            DiagnosticsLogger.LogException(LogCategories.Core, "Failed to hook existing Explorer lifecycle.", ex);
                             ComInteropScope.TryRelease(explorer, LogCategories.Core, "Failed to release Explorer after hook failure.");
                         }
                     }
@@ -92,28 +98,34 @@ namespace NcTalkOutlookAddIn
                 try
                 {
                     activeExplorer = _outlookApplication.ActiveExplorer();
-                    HookInlineResponseExplorer(activeExplorer);
+                    if (!HookExplorer(activeExplorer))
+                    {
+                        ComInteropScope.TryRelease(
+                            activeExplorer,
+                            LogCategories.Core,
+                            "Failed to release an untracked ActiveExplorer.");
+                    }
                 }
                 catch (Exception ex)
                 {
-                    DiagnosticsLogger.LogException(LogCategories.Core, "Failed to hook active Explorer inline-response lifecycle.", ex);
+                    DiagnosticsLogger.LogException(LogCategories.Core, "Failed to hook active Explorer lifecycle.", ex);
                     ComInteropScope.TryRelease(activeExplorer, LogCategories.Core, "Failed to release ActiveExplorer after hook failure.");
                 }
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.LogException(LogCategories.Core, "Failed to initialize Explorer inline-response hooks.", ex);
+                DiagnosticsLogger.LogException(LogCategories.Core, "Failed to initialize Explorer hooks.", ex);
             }
         }
 
-        private bool HookInlineResponseExplorer(Outlook.Explorer explorer)
+        private bool HookExplorer(Outlook.Explorer explorer)
         {
             if (explorer == null)
             {
                 return false;
             }
             string explorerKey = ComInteropScope.ResolveIdentityKey(explorer, LogCategories.Core, "Explorer");
-            if (string.IsNullOrWhiteSpace(explorerKey) || _inlineResponseExplorerEvents.ContainsKey(explorerKey))
+            if (string.IsNullOrWhiteSpace(explorerKey) || _hookedExplorerEvents.ContainsKey(explorerKey))
             {
                 return false;
             }
@@ -128,6 +140,8 @@ namespace NcTalkOutlookAddIn
                 item => OnExplorerInlineResponse(explorerKey, item);
             Outlook.ExplorerEvents_10_InlineResponseCloseEventHandler inlineResponseCloseHandler =
                 () => OnExplorerInlineResponseClose(explorerKey);
+            Outlook.ExplorerEvents_10_SelectionChangeEventHandler selectionChangeHandler =
+                () => OnExplorerSelectionChanged(explorerKey);
 
             explorerEvents.InlineResponse += inlineResponseHandler;
             try
@@ -153,17 +167,41 @@ namespace NcTalkOutlookAddIn
                     ex);
                 return false;
             }
-            _inlineResponseExplorerEvents[explorerKey] = explorerEvents;
+            bool selectionChangeHooked = false;
+            try
+            {
+                explorerEvents.SelectionChange += selectionChangeHandler;
+                selectionChangeHooked = true;
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsLogger.LogException(
+                    LogCategories.Core,
+                    "Failed to hook Explorer.SelectionChange (explorerKey=" + explorerKey + ").",
+                    ex);
+            }
+
+            _hookedExplorerEvents[explorerKey] = explorerEvents;
             _inlineResponseHandlers[explorerKey] = inlineResponseHandler;
             _inlineResponseCloseHandlers[explorerKey] = inlineResponseCloseHandler;
-            _inlineResponseExplorers[explorerKey] = explorer;
-            LogCore("Explorer inline-response lifecycle hooked (explorerKey=" + explorerKey + ").");
+            if (selectionChangeHooked)
+            {
+                _explorerSelectionChangeHandlers[explorerKey] = selectionChangeHandler;
+            }
+            _hookedExplorers[explorerKey] = explorer;
+            OnExplorerSelectionChanged(explorerKey);
+            LogCore(
+                "Explorer lifecycle hooked (explorerKey="
+                + explorerKey
+                + ", calendarSelection="
+                + selectionChangeHooked
+                + ").");
             return true;
         }
 
-        private void UnhookExplorerInlineResponseHooks()
+        private void UnhookExplorerHooks()
         {
-            foreach (var pair in _inlineResponseExplorerEvents)
+            foreach (var pair in _hookedExplorerEvents)
             {
                 Outlook.ExplorerEvents_10_InlineResponseEventHandler inlineResponseHandler;
                 if (_inlineResponseHandlers.TryGetValue(pair.Key, out inlineResponseHandler))
@@ -182,32 +220,48 @@ namespace NcTalkOutlookAddIn
                 }
 
                 Outlook.ExplorerEvents_10_InlineResponseCloseEventHandler inlineResponseCloseHandler;
-                if (!_inlineResponseCloseHandlers.TryGetValue(pair.Key, out inlineResponseCloseHandler))
+                if (_inlineResponseCloseHandlers.TryGetValue(pair.Key, out inlineResponseCloseHandler))
                 {
-                    continue;
+                    try
+                    {
+                        pair.Value.InlineResponseClose -= inlineResponseCloseHandler;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticsLogger.LogException(
+                            LogCategories.Core,
+                            "Failed to unhook Explorer.InlineResponseClose (explorerKey=" + pair.Key + ").",
+                            ex);
+                    }
                 }
-                try
+
+                Outlook.ExplorerEvents_10_SelectionChangeEventHandler selectionChangeHandler;
+                if (_explorerSelectionChangeHandlers.TryGetValue(pair.Key, out selectionChangeHandler))
                 {
-                    pair.Value.InlineResponseClose -= inlineResponseCloseHandler;
-                }
-                catch (Exception ex)
-                {
-                    DiagnosticsLogger.LogException(
-                        LogCategories.Core,
-                        "Failed to unhook Explorer.InlineResponseClose (explorerKey=" + pair.Key + ").",
-                        ex);
+                    try
+                    {
+                        pair.Value.SelectionChange -= selectionChangeHandler;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticsLogger.LogException(
+                            LogCategories.Core,
+                            "Failed to unhook Explorer.SelectionChange (explorerKey=" + pair.Key + ").",
+                            ex);
+                    }
                 }
             }
-            _inlineResponseExplorerEvents.Clear();
+            _hookedExplorerEvents.Clear();
             _inlineResponseHandlers.Clear();
             _inlineResponseCloseHandlers.Clear();
+            _explorerSelectionChangeHandlers.Clear();
             _inlineResponseSubscriptions.Clear();
 
-            foreach (var pair in _inlineResponseExplorers)
+            foreach (var pair in _hookedExplorers)
             {
                 ComInteropScope.TryRelease(pair.Value, LogCategories.Core, "Failed to release tracked Explorer COM object.");
             }
-            _inlineResponseExplorers.Clear();
+            _hookedExplorers.Clear();
 
             if (_explorersEvents != null)
             {
@@ -289,11 +343,11 @@ namespace NcTalkOutlookAddIn
         {
             try
             {
-                HookInlineResponseExplorer(explorer);
+                HookExplorer(explorer);
             }
             catch (Exception ex)
             {
-                DiagnosticsLogger.LogException(LogCategories.Core, "Failed to hook new Explorer inline-response lifecycle.", ex);
+                DiagnosticsLogger.LogException(LogCategories.Core, "Failed to hook new Explorer lifecycle.", ex);
             }
         }
 

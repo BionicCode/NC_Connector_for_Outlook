@@ -89,6 +89,7 @@
   <ItemGroup>
     <Compile Include="NextcloudTalkAddIn.cs" />
     <Compile Include="NextcloudTalkAddIn.Hooks.cs" />
+    <Compile Include="NextcloudTalkAddIn.CalendarSelection.cs" />
     <Compile Include="NextcloudTalkAddIn.Logging.cs" />
     <Compile Include="NextcloudTalkAddIn.Lifecycle.cs" />
     <Compile Include="NextcloudTalkAddIn.PolicyTemplates.cs" />

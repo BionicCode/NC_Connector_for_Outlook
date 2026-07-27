@@ -106,6 +106,8 @@ Root:
   Add-in-Bootstrap/Teardown (`OnConnection`, Shutdown/Disconnect).
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.Hooks.cs`
   Dedizierte Outlook-Event Hook-/Unhook-Helper.
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.CalendarSelection.cs`
+  Rebind ausgewählter Termine für das Löschen aus der Kalenderansicht ohne Kalenderscan.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.Logging.cs`
   Kategorienspezifische Runtime-Logging-Helper.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.PolicyTemplates.cs`  
@@ -253,8 +255,8 @@ Runtime-Regeln:
 3. `TalkRibbonController` lädt Backend- und Passwort-Policy parallel, bevor der Wizard geöffnet wird. Ein Delegationsziel wird als eigener Benutzer abgelehnt, wenn es zur kanonischen UID, zum konfigurierten Login oder zur bekannten primären E-Mail-Adresse passt.
 4. `TalkService` erstellt den Raum. `TalkAppointmentController.ApplyRoomToAppointment(...)` schreibt URL, lokalisierten Body-Block und `X-NCTALK-*`-Metadaten in den Termin.
 5. Beim Speichern liest die Appointment-Subscription die benötigten Outlook-Werte auf dem STA-Thread. `TalkAppointmentSyncCoordinator` fasst unveränderliche Snapshots zusammen und führt Lobby-, Beschreibungs-, Teilnehmer- und Delegationsaufrufe im Hintergrund aus.
-6. `BeforeDelete` verwendet Outlooks terminspezifisches Löschereignis. Organizer-, Token-, Delegations- und Serienprüfung laufen an diesem Termin, bevor `QueueSavedTalkRoomDeletion(...)` einen Löschauftrag mit `PolicyRequired=true` erstellt; URL- oder Ortsauswertung ist keine Löschquelle. Der Hintergrund-Worker wertet die wirksame `TalkDeleteRoomOnEventDelete`-Policy vor der Raumlöschung aus. Derselbe Ereignispfad gilt für die Löschung aus dem geöffneten Termin und aus der Kalenderansicht.
-7. Beim Start wird nur der persistente Lösch-Retry-Worker initialisiert. Stores oder Kalenderordner werden nicht aufgezählt, Kalenderelemente nicht durchsucht und keine ordnerbezogenen `Items`-Subscriptions gehalten.
+6. `BeforeDelete` verwendet Outlooks terminspezifisches Löschereignis. Organizer-, Token-, Delegations- und Serienprüfung laufen an diesem Termin, bevor `QueueSavedTalkRoomDeletion(...)` einen Löschauftrag mit `PolicyRequired=true` erstellt; URL- oder Ortsauswertung ist keine Löschquelle. Der Hintergrund-Worker wertet die wirksame `TalkDeleteRoomOnEventDelete`-Policy vor der Raumlöschung aus. Derselbe Ereignispfad gilt für die Löschung aus dem geöffneten Termin und aus der Kalenderansicht. `Explorer.SelectionChange` bindet nur ausgewählte Talk-Termine; beim Hook jedes Explorers wird dessen aktuelle Auswahl einmal verarbeitet, damit die Kalenderlöschung direkt nach einem Outlook-Neustart ohne vorheriges Öffnen funktioniert.
+7. Beim Start werden nur der persistente Lösch-Retry-Worker und bestehende Explorer-Oberflächen initialisiert. Stores oder Kalenderordner werden nicht aufgezählt, Kalenderelemente nicht durchsucht und keine ordnerbezogenen `Items`-Subscriptions gehalten.
 8. Die DPAPI-geschützte Löschqueue besitzt Primärdatei und Sicherung. Die Nextcloud-Löschung läuft im Hintergrund; fehlgeschlagene Löschungen werden verzögert und nach einem Outlook-Neustart wiederholt. Die Bereinigung eines neu erstellten Raums aus einem ungespeicherten und verworfenen Termin verwendet dieselbe Queue mit `PolicyRequired=false`. Beim Laden älterer Zustände bleiben nur bereits zur Löschung vorgemerkte Einträge erhalten; reine Tracking-Einträge werden verworfen.
 
 #### HTML-Subset für Talk-Termine (Backend-Vorlagen)

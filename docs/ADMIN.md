@@ -583,7 +583,7 @@ Deleting a saved Outlook appointment removes its remote Talk room only when the 
 
 Deleting one occurrence or an exception from a recurring appointment does not remove the shared room. Only a non-recurring appointment or the series master can queue room deletion.
 
-NC Connector reacts only to Outlook events for the individual Talk appointment. The appointment deletion event queues the room for deletion; this covers deletion from an open appointment and from the calendar view. Outlook startup does not enumerate stores or calendar folders and does not scan calendar items.
+NC Connector reacts only to Outlook events for the individual Talk appointment. Opening or selecting a Talk appointment binds that appointment to the deletion event, including the current calendar selection restored after an Outlook restart. Deletion from an open appointment and from the calendar view therefore uses the same checks and queue. Outlook startup does not enumerate stores or calendar folders and does not scan calendar items.
 
 Queued room deletions are stored per Outlook profile and retried in the background after temporary Nextcloud failures or an Outlook restart. The cleanup of a newly created room from an unsaved, discarded appointment remains active.
 
@@ -592,9 +592,9 @@ Moderator delegation rejects the current Nextcloud user when the wizard input ma
 Before enabling saved-appointment room deletion across an organization:
 
 1. Create and save a Talk appointment with a pilot account.
-2. Delete it from the open appointment and from Outlook's calendar view.
-3. Verify that the remote room is removed in both cases.
-4. Document room recovery or recreation procedures for users.
+2. Restart Outlook, then delete the still-unopened appointment directly from the calendar view.
+3. Verify that the remote room is removed.
+4. Repeat with deletion from the open appointment, then document room recovery or recreation procedures for users.
 
 ## Internet Free/Busy Gateway (IFB)
 

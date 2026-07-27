@@ -583,7 +583,7 @@ Das Löschen eines gespeicherten Outlook-Termins entfernt den zugehörigen entfe
 
 Das Löschen eines einzelnen Vorkommens oder einer Ausnahme einer Terminserie entfernt den gemeinsamen Raum nicht. Nur ein Nicht-Serientermin oder der Serienmaster kann die Raumlöschung vormerken.
 
-NC Connector reagiert ausschließlich auf Outlook-Ereignisse des jeweiligen Talk-Termins. Das Termin-Löschereignis stellt den Raum zur Löschung ein; dies gilt für die Löschung aus dem geöffneten Termin und aus der Kalenderansicht. Beim Outlook-Start werden weder Stores oder Kalenderordner aufgezählt noch Kalenderelemente durchsucht.
+NC Connector reagiert ausschließlich auf Outlook-Ereignisse des jeweiligen Talk-Termins. Das Öffnen oder Auswählen eines Talk-Termins bindet genau diesen Termin an das Löschereignis; das gilt auch für die nach einem Outlook-Neustart wiederhergestellte aktuelle Kalenderauswahl. Damit verwenden das Löschen aus dem geöffneten Termin und aus der Kalenderansicht dieselben Prüfungen und dieselbe Queue. Beim Outlook-Start werden weder Stores oder Kalenderordner aufgezählt noch Kalenderelemente durchsucht.
 
 Vorgemerkte Raumlöschungen werden pro Outlook-Profil gespeichert und nach vorübergehenden Nextcloud-Fehlern oder einem Outlook-Neustart im Hintergrund wiederholt. Die Bereinigung eines neu erstellten Raums aus einem ungespeicherten und verworfenen Termin bleibt aktiv.
 
@@ -592,9 +592,9 @@ Die Moderatorübergabe lehnt den aktuellen Nextcloud-Benutzer ab, wenn die Wizar
 Vor der organisationsweiten Aktivierung der Raumlöschung für gespeicherte Termine:
 
 1. Mit einem Pilotkonto einen Talk-Termin erstellen und speichern.
-2. Den Termin aus dem geöffneten Termin und aus Outlooks Kalenderansicht löschen.
-3. Prüfen, dass der entfernte Raum in beiden Fällen gelöscht wird.
-4. Wiederherstellung oder Neuerstellung eines Raums für Benutzer dokumentieren.
+2. Outlook neu starten und den weiterhin ungeöffneten Termin direkt aus der Kalenderansicht löschen.
+3. Prüfen, dass der entfernte Raum gelöscht wird.
+4. Den Test mit dem Löschen aus dem geöffneten Termin wiederholen und Wiederherstellung oder Neuerstellung eines Raums für Benutzer dokumentieren.
 
 ## Internet Free/Busy Gateway (IFB)
 

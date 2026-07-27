@@ -44,10 +44,11 @@ namespace NcTalkOutlookAddIn
         private Outlook.Inspectors _inspectors;
         private Outlook.Explorers _explorers;
         private Outlook.ExplorersEvents_Event _explorersEvents;
-        private readonly Dictionary<string, Outlook.Explorer> _inlineResponseExplorers = new Dictionary<string, Outlook.Explorer>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, Outlook.ExplorerEvents_10_Event> _inlineResponseExplorerEvents = new Dictionary<string, Outlook.ExplorerEvents_10_Event>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Outlook.Explorer> _hookedExplorers = new Dictionary<string, Outlook.Explorer>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Outlook.ExplorerEvents_10_Event> _hookedExplorerEvents = new Dictionary<string, Outlook.ExplorerEvents_10_Event>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Outlook.ExplorerEvents_10_InlineResponseEventHandler> _inlineResponseHandlers = new Dictionary<string, Outlook.ExplorerEvents_10_InlineResponseEventHandler>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Outlook.ExplorerEvents_10_InlineResponseCloseEventHandler> _inlineResponseCloseHandlers = new Dictionary<string, Outlook.ExplorerEvents_10_InlineResponseCloseEventHandler>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Outlook.ExplorerEvents_10_SelectionChangeEventHandler> _explorerSelectionChangeHandlers = new Dictionary<string, Outlook.ExplorerEvents_10_SelectionChangeEventHandler>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, MailComposeSubscription> _inlineResponseSubscriptions = new Dictionary<string, MailComposeSubscription>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, AppointmentSubscription> _subscriptionByEntryId = new Dictionary<string, AppointmentSubscription>(StringComparer.OrdinalIgnoreCase);
         private readonly MailComposeSubscriptionRegistryController _mailComposeSubscriptionRegistry = new MailComposeSubscriptionRegistryController();

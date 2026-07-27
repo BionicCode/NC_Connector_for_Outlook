@@ -54,10 +54,10 @@ foreach ($addition in $additions) {
     }
 }
 
-foreach ($requiredEvent in @("InlineResponse", "InlineResponseClose")) {
+foreach ($requiredEvent in @("InlineResponse", "InlineResponseClose", "SelectionChange")) {
     $matchingAddition = $additions | Where-Object { $_.Event -eq $requiredEvent } | Select-Object -First 1
     if ($null -eq $matchingAddition) {
-        $failures.Add("Compose lifecycle does not subscribe Explorer.$requiredEvent.")
+        $failures.Add("Outlook lifecycle does not subscribe Explorer.$requiredEvent.")
     }
 }
 

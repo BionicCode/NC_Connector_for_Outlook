@@ -51,6 +51,9 @@ $calendarMonitor = Join-Path $SourceRoot "Services\TalkCalendarLifecycleMonitor.
 $appointmentController = Join-Path $SourceRoot "Controllers\TalkAppointmentController.cs"
 $appointmentSyncController = Join-Path $SourceRoot "Controllers\TalkAppointmentController.Sync.cs"
 $appointmentSubscription = Join-Path $SourceRoot "NextcloudTalkAddIn.AppointmentSubscription.cs"
+$calendarSelection = Join-Path $SourceRoot "NextcloudTalkAddIn.CalendarSelection.cs"
+$hooks = Join-Path $SourceRoot "NextcloudTalkAddIn.Hooks.cs"
+$subscriptionEnsure = Join-Path $SourceRoot "NextcloudTalkAddIn.SubscriptionEnsure.cs"
 $appointmentSync = Join-Path $SourceRoot "NextcloudTalkAddIn.TalkAppointmentSync.cs"
 $talkLifecycle = Join-Path $SourceRoot "NextcloudTalkAddIn.TalkRoomLifecycle.cs"
 $lifecycle = Join-Path $SourceRoot "NextcloudTalkAddIn.Lifecycle.cs"
@@ -70,6 +73,9 @@ Assert-PathAbsent `
     $calendarMonitor
 foreach ($path in @(
     $appointmentSubscription,
+    $calendarSelection,
+    $hooks,
+    $subscriptionEnsure,
     $talkLifecycle,
     $lifecycle,
     $talkCoordinator,
@@ -88,6 +94,26 @@ foreach ($path in @(
         $path `
         'ItemsEvents_Item(?:Add|Change|Remove)'
 }
+Assert-SourceContract `
+    "Explorer lifecycle subscribes and unsubscribes calendar selection changes" `
+    $hooks `
+    'SelectionChange\s*\+=\s*selectionChangeHandler[\s\S]*SelectionChange\s*-=\s*selectionChangeHandler'
+Assert-SourceContract `
+    "Existing Explorer selection is processed immediately after the hook is installed" `
+    $hooks `
+    '_hookedExplorers\[explorerKey\]\s*=\s*explorer;[\s\S]{0,300}OnExplorerSelectionChanged\(explorerKey\)'
+Assert-SourceContract `
+    "Selected appointments reuse the targeted appointment subscription path" `
+    $calendarSelection `
+    'selection\s*=\s*explorer\.Selection[\s\S]*selection\.Count[\s\S]*EnsureSubscriptionForSelectedAppointment'
+Assert-SourceContract `
+    "Duplicate deferred selection callbacks release their unowned appointment reference" `
+    $subscriptionEnsure `
+    'if\s*\(\s*!_deferredAppointmentEnsureState\.TryQueuePendingKey\(ensureKey\)\s*\)\s*\{\s*return false;'
+Assert-SourceAbsent `
+    "Calendar selection binding does not enumerate stores, folders, or calendar Items collections" `
+    $calendarSelection `
+    '(?i)(?:session|application\.Session)\.Stores|\.Folders\b|\.Items\b'
 Assert-SourceContract `
     "Outlook startup initializes only the pending Talk deletion queue" `
     $lifecycle `

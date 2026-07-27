@@ -92,6 +92,7 @@ Key code locations:
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.cs` — entry point, ribbon XML, Outlook event wiring, orchestration
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.Lifecycle.cs` — add-in bootstrap/teardown lifecycle (`OnConnection`, shutdown/disconnect)
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.Hooks.cs` — dedicated Outlook event hook/unhook wiring helpers
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.CalendarSelection.cs` — selected-appointment rebinding for calendar-view deletion without a calendar scan
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.Logging.cs` — category-specific runtime logging helpers
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.PolicyTemplates.cs` — backend policy + Talk template/language resolver helpers
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.SubscriptionEnsure.cs` — deferred appointment-subscription ensure and Outlook event-restriction handling
@@ -232,7 +233,8 @@ Runtime rules:
    - If Outlook exposes the final changed start time only shortly after `Write`, a short deferred post-write capture reads that same opened appointment instead of scanning calendars.
    - **Close** of a newly created, unsaved appointment queues orphan-room cleanup.
    - **BeforeDelete** uses Outlook's appointment-specific deletion event. Organizer, token, delegation, and recurrence checks run on that appointment before `QueueSavedTalkRoomDeletion(...)` creates a deletion job with `PolicyRequired=true`; URL/location parsing is not a deletion source. The background worker resolves the effective `TalkDeleteRoomOnEventDelete` policy before deleting the room. The same event path covers deletion from an open appointment and from the calendar view.
-7. Startup initializes only the persistent deletion retry worker. It does not enumerate Outlook stores or calendar folders, scan calendar items, or retain folder-level `Items` subscriptions.
+   - `Explorer.SelectionChange` rebinds only selected Talk appointments. The current selection is processed once when each Explorer is hooked, so calendar-view deletion also works immediately after an Outlook restart without opening the appointment.
+7. Startup initializes only the persistent deletion retry worker and hooks existing Explorer surfaces. It does not enumerate Outlook stores or calendar folders, scan calendar items, or retain folder-level `Items` subscriptions.
 8. The DPAPI-protected deletion queue uses a primary file and backup. Nextcloud deletion runs in the background, and queued failures are retried after delay and after an Outlook restart. Cleanup of a newly created room from an unsaved, discarded appointment uses the same queue with `PolicyRequired=false`. When older state is loaded, only records already marked for deletion survive; tracking-only records are discarded.
 
 #### Talk appointment-safe HTML subset (backend custom templates)
