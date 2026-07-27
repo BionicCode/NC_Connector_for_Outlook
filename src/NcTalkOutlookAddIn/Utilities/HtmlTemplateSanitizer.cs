@@ -108,6 +108,10 @@ accept action align alt autocapitalize autocomplete autopictureinpicture autopla
 
         private static readonly Lazy<HtmlSanitizer> Sanitizer = new Lazy<HtmlSanitizer>(CreateSanitizer, true);
         private static int _dependencyBootstrapDone;
+        // Some dependency type initializers raise AssemblyResolve without a requester.
+        // Accept that case only while this thread is synchronously processing a template.
+        [ThreadStatic]
+        private static int _dependencyResolutionScopeDepth;
         private static readonly Regex RgbaColorRegex = new Regex(
             @"rgba\(\s*(?<r>\d{1,3})\s*,\s*(?<g>\d{1,3})\s*,\s*(?<b>\d{1,3})\s*,\s*(?<a>0|0?\.\d+|1(?:\.0+)?)\s*\)",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -163,6 +167,7 @@ accept action align alt autocapitalize autocomplete autopictureinpicture autopla
             {
                 return string.Empty;
             }
+            _dependencyResolutionScopeDepth++;
             try
             {
                 var parser = new HtmlParser();
@@ -330,6 +335,10 @@ accept action align alt autocapitalize autocomplete autopictureinpicture autopla
                     ex);
                 return html;
             }
+            finally
+            {
+                _dependencyResolutionScopeDepth--;
+            }
         }
 
         private static void EnsureSanitizerDependencies()
@@ -374,14 +383,34 @@ accept action align alt autocapitalize autocomplete autopictureinpicture autopla
             {
                 return null;
             }
+
             string assemblyDirectory = Path.GetDirectoryName(typeof(HtmlTemplateSanitizer).Assembly.Location) ?? string.Empty;
+            if (args.RequestingAssembly == null)
+            {
+                if (_dependencyResolutionScopeDepth <= 0)
+                {
+                    return null;
+                }
+            }
+            else if (!IsSanitizerDependencyRequester(args.RequestingAssembly, assemblyDirectory))
+            {
+                return null;
+            }
+
             string dependencyPath = Path.Combine(assemblyDirectory, requestedName + ".dll");
             if (!File.Exists(dependencyPath))
             {
                 return null;
             }
+
             try
             {
+                AssemblyName targetAssembly = AssemblyName.GetAssemblyName(dependencyPath);
+                if (!CanRedirectToSanitizerDependency(requestedAssembly, targetAssembly))
+                {
+                    return null;
+                }
+
                 return Assembly.LoadFrom(dependencyPath);
             }
             catch (Exception ex)
@@ -389,6 +418,78 @@ accept action align alt autocapitalize autocomplete autopictureinpicture autopla
                 DiagnosticsLogger.LogException(LogCategories.Core, "Failed to resolve sanitizer dependency '" + requestedName + "'.", ex);
                 return null;
             }
+        }
+
+        private static bool IsSanitizerDependencyRequester(Assembly requestingAssembly, string assemblyDirectory)
+        {
+            if (requestingAssembly == null || string.IsNullOrWhiteSpace(assemblyDirectory))
+            {
+                return false;
+            }
+
+            try
+            {
+                string requesterName = requestingAssembly.GetName().Name;
+                string addinAssemblyName = typeof(HtmlTemplateSanitizer).Assembly.GetName().Name;
+                if (!string.Equals(requesterName, addinAssemblyName, StringComparison.OrdinalIgnoreCase) &&
+                    !SanitizerDependencyNames.Contains(requesterName))
+                {
+                    return false;
+                }
+
+                string requesterDirectory = Path.GetDirectoryName(requestingAssembly.Location) ?? string.Empty;
+                return string.Equals(
+                    Path.GetFullPath(requesterDirectory),
+                    Path.GetFullPath(assemblyDirectory),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool CanRedirectToSanitizerDependency(
+            AssemblyName requestedAssembly,
+            AssemblyName targetAssembly)
+        {
+            if (requestedAssembly == null ||
+                targetAssembly == null ||
+                requestedAssembly.Version == null ||
+                targetAssembly.Version == null ||
+                !string.Equals(requestedAssembly.Name, targetAssembly.Name, StringComparison.OrdinalIgnoreCase) ||
+                requestedAssembly.Version > targetAssembly.Version ||
+                !PublicKeyTokensEqual(
+                    requestedAssembly.GetPublicKeyToken(),
+                    targetAssembly.GetPublicKeyToken()))
+            {
+                return false;
+            }
+
+            string requestedCulture = requestedAssembly.CultureInfo == null
+                ? string.Empty
+                : requestedAssembly.CultureInfo.Name;
+            string targetCulture = targetAssembly.CultureInfo == null
+                ? string.Empty
+                : targetAssembly.CultureInfo.Name;
+            return string.Equals(requestedCulture, targetCulture, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool PublicKeyTokensEqual(byte[] first, byte[] second)
+        {
+            if (first == null || second == null || first.Length != second.Length)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < first.Length; index++)
+            {
+                if (first[index] != second[index])
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private static void TryLoadDependency(string path)
@@ -402,7 +503,10 @@ accept action align alt autocapitalize autocomplete autopictureinpicture autopla
                 AssemblyName targetAssembly = AssemblyName.GetAssemblyName(path);
                 bool alreadyLoaded = AppDomain.CurrentDomain
                     .GetAssemblies()
-                    .Any(loaded => AssemblyName.ReferenceMatchesDefinition(loaded.GetName(), targetAssembly));
+                    .Any(loaded => string.Equals(
+                        loaded.GetName().FullName,
+                        targetAssembly.FullName,
+                        StringComparison.OrdinalIgnoreCase));
                 if (alreadyLoaded)
                 {
                     return;
@@ -470,6 +574,7 @@ accept action align alt autocapitalize autocomplete autopictureinpicture autopla
             {
                 return string.Empty;
             }
+            _dependencyResolutionScopeDepth++;
             try
             {
                 HtmlStructureStats inputStats = AnalyzeHtmlStructure(html);
@@ -511,6 +616,10 @@ accept action align alt autocapitalize autocomplete autopictureinpicture autopla
                 throw new InvalidOperationException(
                     "Template sanitization failed (" + (templateType ?? "unknown") + ").",
                     ex);
+            }
+            finally
+            {
+                _dependencyResolutionScopeDepth--;
             }
         }
 

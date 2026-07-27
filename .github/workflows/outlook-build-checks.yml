@@ -66,6 +66,10 @@ jobs:
         shell: pwsh
         run: .\tools\ci\Check-VendorPackage.ps1
 
+      - name: Resolve vendored assembly references
+        shell: pwsh
+        run: .\tools\ci\Check-VendorAssemblyBindings.ps1
+
   code-hygiene:
     name: Code hygiene
     runs-on: windows-latest
