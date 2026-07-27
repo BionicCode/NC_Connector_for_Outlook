@@ -175,6 +175,7 @@ Services:
 - `src/NcTalkOutlookAddIn/Services/TalkAppointmentSyncCoordinator.cs` (fasst entfernte Talk-Aktualisierungen aus Outlook-Ereignissen zusammen)
 - `src/NcTalkOutlookAddIn/Services/TalkRoomLifecycleCoordinator.cs` und `TalkRoomLifecycleStore.cs` (Persistenz und Wiederholung vorgemerkter Raumlöschungen ohne Outlook-Kalenderscan)
 - `src/NcTalkOutlookAddIn/Services/IfbRegistryOwnershipManager.cs` und `IfbRegistryStateStore.cs` (IFB-Registry-Wiederherstellung); `FreeBusyServer.cs` prüft den geheimen Anfragepfad und begrenzt parallele Anfragen.
+- `src/NcTalkOutlookAddIn/Services/ProtectedJsonStateStore.cs` stellt den gemeinsamen Pfad für DPAPI-geschütztes JSON und Backup-Wiederherstellung der Talk-Löschwarteschlange und des IFB-Registry-Besitzstatus bereit. Schreibvorgänge bevorzugen den atomaren Austausch und behalten den bestehenden Copy-Fallback; die typisierten Stores behalten ihre fachlichen Dateinamen, Entropie, Validierung und Diagnosemeldungen.
 
 Update-Check:
 

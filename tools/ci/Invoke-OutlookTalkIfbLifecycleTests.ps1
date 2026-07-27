@@ -62,6 +62,7 @@ $ifbManager = Join-Path $SourceRoot "Services\FreeBusyManager.cs"
 $ifbServer = Join-Path $SourceRoot "Services\FreeBusyServer.cs"
 $ifbCache = Join-Path $SourceRoot "Services\IfbAddressBookCache.cs"
 $ifbOwnership = Join-Path $SourceRoot "Services\IfbRegistryOwnershipManager.cs"
+$protectedStateStore = Join-Path $SourceRoot "Services\ProtectedJsonStateStore.cs"
 $talkStore = Join-Path $SourceRoot "Services\TalkRoomLifecycleStore.cs"
 $ifbStore = Join-Path $SourceRoot "Services\IfbRegistryStateStore.cs"
 
@@ -198,13 +199,17 @@ Assert-SourceContract `
     $ifbOwnership `
     'ThrowIfPolicyConflicts'
 Assert-SourceContract `
-    "Talk lifecycle journal uses durable backup replacement" `
-    $talkStore `
+    "Protected state journals use durable backup replacement" `
+    $protectedStateStore `
     'DurableFileReplace\.CommitPreparedFile'
 Assert-SourceContract `
-    "IFB ownership journal uses durable backup replacement" `
+    "Talk lifecycle journal uses the protected JSON state store" `
+    $talkStore `
+    'ProtectedJsonStateStore<TalkRoomLifecycleState>'
+Assert-SourceContract `
+    "IFB ownership journal uses the protected JSON state store" `
     $ifbStore `
-    'DurableFileReplace\.CommitPreparedFile'
+    'ProtectedJsonStateStore<IfbRegistryState>'
 
 $TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
     "nc4ol-talk-ifb-tests-" + [Guid]::NewGuid().ToString("N"))
@@ -217,8 +222,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Web.Script.Serialization;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Services;
 
@@ -298,6 +306,7 @@ internal static class TalkIfbLifecycleTests
         TestDeletionRetryAcrossRestart();
         TestPendingStoreMigration();
         TestSyncCoalescing();
+        TestProtectedStateStoreCompatibility();
         TestDurableReplacement();
 
         if (failures > 0)
@@ -861,6 +870,206 @@ internal static class TalkIfbLifecycleTests
         };
     }
 
+    private static void TestProtectedStateStoreCompatibility()
+    {
+        string root = NewTestRoot("protected-state");
+        const string profile = " compatibility-profile ";
+        string talkPath = Path.Combine(
+            root,
+            "talk-room-lifecycle-339954de9e466b4233c67981.dat");
+        string ifbPath = Path.Combine(
+            root,
+            "ifb-registry-state-339954de9e466b4233c67981.dat");
+        try
+        {
+            var talkState = new TalkRoomLifecycleState();
+            talkState.Records.Add(
+                NewLifecycleRecord("compatible-room", true));
+            WriteCompatibleProtectedState(
+                talkPath,
+                talkState,
+                "NC4OL::TalkRoomLifecycle::v1");
+
+            var ifbState = new IfbRegistryState();
+            ifbState.Ownership.Add(
+                new IfbRegistryOwnership
+                {
+                    RegistryPath = @"Software\NC4OL\Test",
+                    ValueName = "FreeBusySupport",
+                    WrittenValue = "http://127.0.0.1/test"
+                });
+            WriteCompatibleProtectedState(
+                ifbPath,
+                ifbState,
+                "NC4OL::IFB::RegistryState::v1");
+
+            TalkRoomLifecycleState loadedTalk =
+                new TalkRoomLifecycleStore(root, profile).Load();
+            Check(
+                "Talk store reads the existing protected state format",
+                loadedTalk.Records.Count == 1
+                && loadedTalk.Records[0].RoomToken
+                    == "compatible-room");
+            IfbRegistryState loadedIfb =
+                new IfbRegistryStateStore(root, profile).Load();
+            Check(
+                "IFB store reads the existing protected state format",
+                loadedIfb.Ownership.Count == 1
+                && loadedIfb.Ownership[0].ValueName
+                    == "FreeBusySupport");
+
+            loadedTalk.Records[0].RoomToken = "saved-room";
+            new TalkRoomLifecycleStore(root, profile).Save(
+                loadedTalk);
+            TalkRoomLifecycleState savedTalk =
+                ReadCompatibleProtectedState<TalkRoomLifecycleState>(
+                    talkPath,
+                    "NC4OL::TalkRoomLifecycle::v1");
+            Check(
+                "Talk store keeps its file name, entropy, and JSON format",
+                savedTalk.Records.Count == 1
+                && savedTalk.Records[0].RoomToken == "saved-room"
+                && !HasUtf8Bom(talkPath));
+
+            loadedIfb.Ownership[0].WrittenValue =
+                "http://127.0.0.1/saved";
+            new IfbRegistryStateStore(root, profile).Save(loadedIfb);
+            IfbRegistryState savedIfb =
+                ReadCompatibleProtectedState<IfbRegistryState>(
+                    ifbPath,
+                    "NC4OL::IFB::RegistryState::v1");
+            Check(
+                "IFB store keeps its file name, entropy, and JSON format",
+                savedIfb.Ownership.Count == 1
+                && savedIfb.Ownership[0].WrittenValue.EndsWith(
+                    "/saved",
+                    StringComparison.Ordinal)
+                && !HasUtf8Bom(ifbPath));
+
+            string talkBackupPath = talkPath + ".bak";
+            var backupTalkState = new TalkRoomLifecycleState();
+            backupTalkState.Records.Add(
+                NewLifecycleRecord("backup-room", true));
+            WriteCompatibleProtectedState(
+                talkBackupPath,
+                backupTalkState,
+                "NC4OL::TalkRoomLifecycle::v1");
+            TalkRoomLifecycleState primaryTalk =
+                new TalkRoomLifecycleStore(root, profile).Load();
+            Check(
+                "Talk store prefers a valid primary over its backup",
+                primaryTalk.Records.Count == 1
+                && primaryTalk.Records[0].RoomToken == "saved-room");
+            File.WriteAllText(talkPath, "unreadable");
+            TalkRoomLifecycleState recoveredTalk =
+                new TalkRoomLifecycleStore(root, profile).Load();
+            Check(
+                "Talk store restores a valid backup after primary failure",
+                recoveredTalk.Records.Count == 1
+                && recoveredTalk.Records[0].RoomToken == "backup-room"
+                && File.ReadAllText(talkPath)
+                    == File.ReadAllText(talkBackupPath));
+
+            var invalidTalk = new TalkRoomLifecycleState
+            {
+                Records = null
+            };
+            WriteCompatibleProtectedState(
+                talkPath,
+                invalidTalk,
+                "NC4OL::TalkRoomLifecycle::v1");
+            WriteCompatibleProtectedState(
+                talkBackupPath,
+                invalidTalk,
+                "NC4OL::TalkRoomLifecycle::v1");
+            var blockedTalkStore =
+                new TalkRoomLifecycleStore(root, profile);
+            Check(
+                "Talk store rejects structurally invalid state",
+                blockedTalkStore.Load().Records.Count == 0);
+            bool talkWriteBlocked = false;
+            try
+            {
+                blockedTalkStore.Save(loadedTalk);
+            }
+            catch (InvalidOperationException ex)
+            {
+                talkWriteBlocked = ex.Message
+                    == "Talk room deletion queue is unreadable; existing data was preserved.";
+            }
+            Check(
+                "Talk store blocks writes after failed recovery",
+                talkWriteBlocked);
+
+            string ifbBackupPath = ifbPath + ".bak";
+            File.WriteAllText(ifbPath, "unreadable");
+            File.WriteAllText(ifbBackupPath, "unreadable");
+            var blockedIfbStore =
+                new IfbRegistryStateStore(root, profile);
+            Check(
+                "IFB store returns an empty state after failed recovery",
+                blockedIfbStore.Load().Ownership.Count == 0);
+            bool ifbWriteBlocked = false;
+            try
+            {
+                blockedIfbStore.Save(loadedIfb);
+            }
+            catch (InvalidOperationException ex)
+            {
+                ifbWriteBlocked = ex.Message
+                    == "IFB registry state is unreadable; existing data was preserved.";
+            }
+            Check(
+                "IFB store blocks writes after failed recovery",
+                ifbWriteBlocked);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    private static void WriteCompatibleProtectedState<TState>(
+        string path,
+        TState state,
+        string entropy)
+    {
+        var serializer = new JavaScriptSerializer();
+        byte[] clearBytes = Encoding.UTF8.GetBytes(
+            serializer.Serialize(state));
+        byte[] protectedBytes = ProtectedData.Protect(
+            clearBytes,
+            Encoding.UTF8.GetBytes(entropy),
+            DataProtectionScope.CurrentUser);
+        File.WriteAllText(
+            path,
+            Convert.ToBase64String(protectedBytes),
+            new UTF8Encoding(false));
+    }
+
+    private static TState ReadCompatibleProtectedState<TState>(
+        string path,
+        string entropy)
+    {
+        byte[] protectedBytes = Convert.FromBase64String(
+            File.ReadAllText(path, Encoding.UTF8));
+        byte[] clearBytes = ProtectedData.Unprotect(
+            protectedBytes,
+            Encoding.UTF8.GetBytes(entropy),
+            DataProtectionScope.CurrentUser);
+        return new JavaScriptSerializer().Deserialize<TState>(
+            Encoding.UTF8.GetString(clearBytes));
+    }
+
+    private static bool HasUtf8Bom(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        return bytes.Length >= 3
+            && bytes[0] == 0xef
+            && bytes[1] == 0xbb
+            && bytes[2] == 0xbf;
+    }
+
     private static void TestDurableReplacement()
     {
         string root = Path.Combine(
@@ -922,10 +1131,12 @@ internal static class TalkIfbLifecycleTests
     $sources = @(
         $testSource,
         (Join-Path $SourceRoot "Services\DurableFileReplace.cs"),
+        (Join-Path $SourceRoot "Services\ProtectedJsonStateStore.cs"),
         (Join-Path $SourceRoot "Services\TalkServiceConfiguration.cs"),
         (Join-Path $SourceRoot "Services\TalkAppointmentSyncCoordinator.cs"),
         (Join-Path $SourceRoot "Services\TalkRoomLifecycleCoordinator.cs"),
         (Join-Path $SourceRoot "Services\TalkRoomLifecycleStore.cs"),
+        (Join-Path $SourceRoot "Services\IfbRegistryStateStore.cs"),
         (Join-Path $SourceRoot "Models\TalkAppointmentSyncSnapshot.cs"),
         (Join-Path $SourceRoot "Models\TalkRoomLifecycleRecord.cs"),
         (Join-Path $SourceRoot "Utilities\AppDataPaths.cs"),

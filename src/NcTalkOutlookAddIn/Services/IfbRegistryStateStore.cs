@@ -4,175 +4,47 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
-using System.Security.Cryptography;
-using System.Text;
-using System.Web.Script.Serialization;
 using NcTalkOutlookAddIn.Utilities;
 
 namespace NcTalkOutlookAddIn.Services
 {
     internal sealed class IfbRegistryStateStore
     {
-        private static readonly byte[] ProtectionEntropy =
-            Encoding.UTF8.GetBytes("NC4OL::IFB::RegistryState::v1");
+        private static readonly ProtectedJsonStateStoreDefinition<IfbRegistryState>
+            StoreDefinition = new ProtectedJsonStateStoreDefinition<IfbRegistryState>(
+                "ifb-registry-state",
+                "NC4OL::IFB::RegistryState::v1",
+                IsValid,
+                () => new IfbRegistryState(),
+                LogCategories.Ifb,
+                new ProtectedJsonStateStoreMessages(
+                    "Recovered the IFB registry state from its backup.",
+                    "Failed to restore the IFB registry state backup.",
+                    "IFB registry state recovery failed; the existing files were preserved.",
+                    "IFB registry state is unreadable; existing data was preserved.",
+                    "IFB registry state structure is invalid.",
+                    "Failed to load IFB registry state file '"));
 
-        private readonly object _syncRoot = new object();
-        private readonly string _stateFilePath;
-        private readonly string _backupFilePath;
-        private readonly JavaScriptSerializer _serializer =
-            new JavaScriptSerializer();
-        private bool _writeAllowed = true;
+        private readonly ProtectedJsonStateStore<IfbRegistryState> _store;
 
         internal IfbRegistryStateStore(
             string dataDirectory,
             string profileScope)
         {
-            string directory = string.IsNullOrWhiteSpace(dataDirectory)
-                ? AppDataPaths.EnsureLocalRootDirectory()
-                : dataDirectory;
-            Directory.CreateDirectory(directory);
-            _stateFilePath = Path.Combine(
-                directory,
-                "ifb-registry-state-"
-                + BuildScopeHash(profileScope)
-                + ".dat");
-            _backupFilePath = _stateFilePath + ".bak";
+            _store = new ProtectedJsonStateStore<IfbRegistryState>(
+                dataDirectory,
+                profileScope,
+                StoreDefinition);
         }
 
         internal IfbRegistryState Load()
         {
-            lock (_syncRoot)
-            {
-                IfbRegistryState state;
-                if (TryLoadFile(_stateFilePath, out state))
-                {
-                    return state;
-                }
-                if (TryLoadFile(_backupFilePath, out state))
-                {
-                    DiagnosticsLogger.Log(
-                        LogCategories.Ifb,
-                        "Recovered the IFB registry state from its backup.");
-                    try
-                    {
-                        File.Copy(
-                            _backupFilePath,
-                            _stateFilePath,
-                            true);
-                    }
-                    catch (Exception ex)
-                    {
-                        DiagnosticsLogger.LogException(
-                            LogCategories.Ifb,
-                            "Failed to restore the IFB registry state backup.",
-                            ex);
-                    }
-                    return state;
-                }
-                if (File.Exists(_stateFilePath)
-                    || File.Exists(_backupFilePath))
-                {
-                    _writeAllowed = false;
-                    DiagnosticsLogger.Log(
-                        LogCategories.Ifb,
-                        "IFB registry state recovery failed; the existing files were preserved.");
-                }
-                return new IfbRegistryState();
-            }
+            return _store.Load();
         }
 
         internal void Save(IfbRegistryState state)
         {
-            if (state == null)
-            {
-                throw new ArgumentNullException("state");
-            }
-
-            lock (_syncRoot)
-            {
-                if (!_writeAllowed)
-                {
-                    throw new InvalidOperationException(
-                        "IFB registry state is unreadable; existing data was preserved.");
-                }
-
-                byte[] clearBytes = Encoding.UTF8.GetBytes(
-                    _serializer.Serialize(state));
-                byte[] protectedBytes = ProtectedData.Protect(
-                    clearBytes,
-                    ProtectionEntropy,
-                    DataProtectionScope.CurrentUser);
-                string temporaryPath =
-                    _stateFilePath
-                    + "."
-                    + Guid.NewGuid().ToString("N")
-                    + ".tmp";
-                try
-                {
-                    File.WriteAllText(
-                        temporaryPath,
-                        Convert.ToBase64String(protectedBytes),
-                        new UTF8Encoding(false));
-                    if (DurableFileReplace.CommitPreparedFile(
-                            temporaryPath,
-                            _stateFilePath,
-                            _backupFilePath))
-                    {
-                        temporaryPath = null;
-                    }
-                }
-                finally
-                {
-                    if (!string.IsNullOrEmpty(temporaryPath)
-                        && File.Exists(temporaryPath))
-                    {
-                        File.Delete(temporaryPath);
-                    }
-                }
-            }
-        }
-
-        private bool TryLoadFile(
-            string path,
-            out IfbRegistryState state)
-        {
-            state = null;
-            if (!File.Exists(path))
-            {
-                return false;
-            }
-
-            try
-            {
-                byte[] protectedBytes = Convert.FromBase64String(
-                    File.ReadAllText(path, Encoding.UTF8));
-                byte[] clearBytes = ProtectedData.Unprotect(
-                    protectedBytes,
-                    ProtectionEntropy,
-                    DataProtectionScope.CurrentUser);
-                IfbRegistryState candidate =
-                    _serializer.Deserialize<IfbRegistryState>(
-                        Encoding.UTF8.GetString(clearBytes));
-                if (!IsValid(candidate))
-                {
-                    throw new InvalidDataException(
-                        "IFB registry state structure is invalid.");
-                }
-                state = candidate;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                DiagnosticsLogger.LogException(
-                    LogCategories.Ifb,
-                    "Failed to load IFB registry state file '"
-                    + Path.GetFileName(path)
-                    + "'.",
-                    ex);
-                return false;
-            }
+            _store.Save(state);
         }
 
         private static bool IsValid(IfbRegistryState state)
@@ -201,29 +73,6 @@ namespace NcTalkOutlookAddIn.Services
                 }
             }
             return true;
-        }
-
-        private static string BuildScopeHash(string profileScope)
-        {
-            byte[] input = Encoding.UTF8.GetBytes(
-                string.IsNullOrWhiteSpace(profileScope)
-                    ? "default"
-                    : profileScope.Trim().ToUpperInvariant());
-            byte[] hash;
-            using (SHA256 sha256 = SHA256.Create())
-            {
-                hash = sha256.ComputeHash(input);
-            }
-
-            var builder = new StringBuilder(24);
-            for (int i = 0; i < 12; i++)
-            {
-                builder.Append(
-                    hash[i].ToString(
-                        "x2",
-                        CultureInfo.InvariantCulture));
-            }
-            return builder.ToString();
         }
     }
 

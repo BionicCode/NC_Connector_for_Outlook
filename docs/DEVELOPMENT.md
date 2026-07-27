@@ -124,6 +124,7 @@ Key code locations:
   - `Services/TalkAppointmentSyncCoordinator.cs` coalesces background Talk updates captured from Outlook events.
   - `Services/TalkRoomLifecycleCoordinator.cs` and `TalkRoomLifecycleStore.cs` persist and retry queued room deletions without scanning Outlook calendars.
   - `Services/IfbRegistryOwnershipManager.cs` and `IfbRegistryStateStore.cs` own IFB registry recovery; `FreeBusyServer.cs` validates the secret request path and limits concurrent requests.
+  - `Services/ProtectedJsonStateStore.cs` provides the shared DPAPI-protected JSON and backup-recovery path used by the Talk deletion queue and IFB registry ownership state. Writes prefer atomic replacement and retain the established copy fallback; the typed stores retain feature-specific file names, entropy, validation, and diagnostics.
 - `src/NcTalkOutlookAddIn/UI/` — WinForms dialogs and wizards
   - `UI/ScaledForm.cs` is the shared DPI-scaling base for forms that use logical pixel layout helpers.
 - `src/NcTalkOutlookAddIn/Settings/` — persisted settings model, storage, and managed setup policy
