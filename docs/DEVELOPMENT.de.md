@@ -317,11 +317,12 @@ Backend-Talk-Templates verwenden für die Outlook-Word-/RTF-Pipeline bevorzugt T
 #### IFB-Ablauf
 
 1. Der Benutzer aktiviert IFB in den Einstellungen.
-2. `IfbRegistryStateStore` liefert ein zufälliges Profil-Secret und DPAPI-geschützten Besitzstand mit Primär-/Backup-Wiederherstellung.
-3. `FreeBusyServer` startet den Loopback-Listener, akzeptiert nur `/nc-ifb/<profile-secret>/freebusy/<address>.vfb` und begrenzt gleichzeitige Proxy-Anfragen auf vier.
+2. `FreeBusyManager` erzeugt für jeden Outlook-Prozess ein zufälliges Request-Secret. `IfbRegistryStateStore` hält den DPAPI-geschützten Besitzstand mit Primär-/Backup-Wiederherstellung.
+3. `FreeBusyServer` startet den Loopback-Listener, akzeptiert nur `/nc-ifb/<request-secret>/freebusy/<address>.vfb` und begrenzt gleichzeitige Proxy-Anfragen auf vier.
 4. `IfbRegistryOwnershipManager` merkt sich jeden ursprünglichen Benutzerwert und registriert `%NAME%@%SERVER%.vfb` unterhalb des geheimen Endpunkts. Outlook ersetzt beide Platzhalter durch die vollständige SMTP-Adresse des Teilnehmers. Policy-Werte werden nur auf Konflikte geprüft.
-5. Beim Deaktivieren wird ein ursprünglicher Wert nur wiederhergestellt, wenn der aktuelle Wert noch dem von NC Connector geschriebenen Wert entspricht.
-6. `IfbAddressBookCache` trennt Einträge nach Outlook-Profil, normalisierter Nextcloud-Basis-URL einschließlich Unterpfad und kanonischer Nextcloud-UID.
+5. Beim Upgrade übernimmt der Manager einen nicht zugeordneten alten `/nc-ifb/freebusy/...`-Wert nur in der Form ohne Token. Ein nicht zugeordneter tokenisierter Pfad bleibt gesperrt. Ohne gespeicherten externen Vorgängerwert entfernt das Deaktivieren von IFB den alten Wert, statt ihn wiederherzustellen.
+6. Beim Deaktivieren wird ein ursprünglicher Wert nur wiederhergestellt, wenn der aktuelle Wert noch dem von NC Connector geschriebenen Wert entspricht.
+7. `IfbAddressBookCache` trennt Einträge nach Outlook-Profil, normalisierter Nextcloud-Basis-URL einschließlich Unterpfad und kanonischer Nextcloud-UID.
 
 ## Netzwerk-Endpunkte
 
@@ -362,8 +363,8 @@ Secrets (optionale separate Passwortzustellung):
 IFB (DAV über lokalen Proxy):
 
 - Reservierter Listener-Namespace: `http://127.0.0.1:<ifb-port>/nc-ifb/` (Standardport `7777`)
-- Akzeptierter Outlook-Pfad: `/nc-ifb/<profile-secret>/freebusy/<address>.vfb`; das Secret wird lokal erzeugt und nur im DPAPI-geschützten Profilzustand gespeichert
-- Anfragen ohne Profil-Secret erhalten `404`
+- Akzeptierter Outlook-Pfad: `/nc-ifb/<request-secret>/freebusy/<address>.vfb`; das Secret wird für jeden Outlook-Prozess erzeugt und nicht persistiert. Der DPAPI-geschützte Profilzustand enthält nur den Registry-Besitzstand
+- Anfragen ohne Request-Secret erhalten `404`
 - Der Proxy greift auf CalDAV- und Adressbuch-Endpunkte unter `remote.php/dav/...` zu.
 
 Updateprüfung:
@@ -471,7 +472,7 @@ Vorgeschlagener Ablauf:
 6. Mail: Freigabe-Wizard ausführen, ein oder zwei kleine Dateien hochladen, den Freigabeblock einfügen und an das eigene Konto senden.
 7. Mail: Eine Freigabe einfügen und die Nachricht vor dem Speichern verwerfen; prüfen, dass der exakte Serverordner entfernt wird. Mit Speichern oder AutoSave wiederholen und prüfen, dass die Freigabe bestehen bleibt.
 8. Mail: Bei separater Passwortzustellung die Freigabe erstellen und im selben Verfassen-Fenster auf **Senden** klicken. Prüfen, dass der fertige Follow-up sofort über dasselbe wirksame Outlook-Konto abgeht und kein NC-Connector-Passwortentwurf verbleibt. Mit verzögerter/Offline-Übermittlung wiederholen und die dokumentierte direkte Grenze prüfen: Der Follow-up wartet nicht auf die Hauptmail im Postausgang. Ein geschlossener und erneut geöffneter Hauptentwurf oder eine `.oft`-Vorlage mit vorhandenem Freigabeblock liegt außerhalb des unterstützten Ablaufs und benötigt vor dem Versand eine neue Freigabe.
-9. IFB: IFB aktivieren, URL-Reservierung und TCP-Listener prüfen und danach im Outlook-Terminplanungs-Assistenten eine Adresse verwenden, deren Domain vom konfigurierten Nextcloud-Login und -Host abweicht. Eine direkte Anfrage ohne Profil-Secret muss `404` liefern.
+9. IFB: IFB aktivieren, URL-Reservierung und TCP-Listener prüfen und danach im Outlook-Terminplanungs-Assistenten eine Adresse verwenden, deren Domain vom konfigurierten Nextcloud-Login und -Host abweicht. Eine direkte Anfrage ohne Request-Secret muss `404` liefern.
 10. **Einstellungen -> Erweitert -> Jetzt prüfen** ausführen und kontrollieren, dass aktuelle Version, letzte Prüfung, Download-Link und Änderungsübersicht ohne blockierte Outlook-Oberfläche aktualisiert werden.
 
 ## Referenz der X-NCTALK-*-Eigenschaften

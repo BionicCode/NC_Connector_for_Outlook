@@ -329,11 +329,12 @@ Compose runtime parity additions in `NextcloudTalkAddIn.cs` (`MailComposeSubscri
 #### IFB flow
 
 1. User enables IFB in Settings.
-2. `Services/IfbRegistryStateStore.cs` provides a random profile secret and DPAPI-protected ownership state with primary/backup recovery.
-3. `Services/FreeBusyServer.cs` starts a local HTTP listener on the configured IFB port (`Settings -> IFB -> Local IFB port`, default: `7777`), accepts only `/nc-ifb/<profile-secret>/freebusy/<address>.vfb`, and caps concurrent proxy requests at four.
+2. `Services/FreeBusyManager.cs` creates a random request secret for each Outlook process. `Services/IfbRegistryStateStore.cs` keeps the DPAPI-protected ownership state with primary/backup recovery.
+3. `Services/FreeBusyServer.cs` starts a local HTTP listener on the configured IFB port (`Settings -> IFB -> Local IFB port`, default: `7777`), accepts only `/nc-ifb/<request-secret>/freebusy/<address>.vfb`, and caps concurrent proxy requests at four.
 4. `Services/IfbRegistryOwnershipManager.cs` records each original user value and registers `%NAME%@%SERVER%.vfb` below the secret endpoint. Outlook replaces both placeholders with the attendee's full SMTP address. Policy values are read for conflicts but are not written.
-5. On disable, an original value is restored only if the current value still equals the value written by NC Connector.
-6. `IfbAddressBookCache` scopes cached identities by Outlook profile, normalized Nextcloud base URL including subpath, and canonical Nextcloud UID.
+5. During upgrade, an unowned legacy `/nc-ifb/freebusy/...` value is adopted only in its pre-token form. An unowned tokenized path remains blocked. Without a saved external predecessor, disabling IFB removes the stale legacy value rather than restoring it.
+6. On disable, an original value is restored only if the current value still equals the value written by NC Connector.
+7. `IfbAddressBookCache` scopes cached identities by Outlook profile, normalized Nextcloud base URL including subpath, and canonical Nextcloud UID.
 
 ## Network endpoints
 
@@ -374,8 +375,8 @@ Secrets (optional separate password mode):
 IFB (DAV via proxy):
 
 - Reserved listener namespace: `http://127.0.0.1:<ifb-port>/nc-ifb/` (default `<ifb-port>=7777`)
-- Accepted Outlook path: `/nc-ifb/<profile-secret>/freebusy/<address>.vfb`; the secret is generated locally and stored only in DPAPI-protected profile state
-- Requests without the profile secret return `404`
+- Accepted Outlook path: `/nc-ifb/<request-secret>/freebusy/<address>.vfb`; the secret is generated for each Outlook process and is not persisted. DPAPI-protected profile state stores registry ownership only
+- Requests without the request secret return `404`
 - The proxy talks to CalDAV and Addressbook endpoints under `remote.php/dav/...`
 
 Update check:
@@ -520,7 +521,7 @@ Suggested smoke test sequence:
 6. Mail: run the sharing wizard, upload 1–2 small files, insert the HTML block, and send to yourself.
 7. Mail: insert a share and discard the message before it is saved; verify that the exact server folder is removed. Repeat with Save or AutoSave and verify that the share remains.
 8. Mail: with separate password delivery, create the share and click Send from the same compose window. Verify that the final follow-up leaves through the same effective Outlook account immediately and that no NC Connector password draft remains. Repeat with delayed/offline delivery and verify the documented direct boundary: the follow-up does not wait for the primary Outbox item. A closed and reopened primary draft or an `.oft` template with an existing share block is outside the supported flow and requires a new share before sending.
-9. IFB: enable IFB, verify the URL reservation and TCP listener, then use Outlook's Scheduling Assistant with an address whose domain differs from the configured Nextcloud login and host. A direct request without the profile secret is expected to return `404`.
+9. IFB: enable IFB, verify the URL reservation and TCP listener, then use Outlook's Scheduling Assistant with an address whose domain differs from the configured Nextcloud login and host. A direct request without the request secret is expected to return `404`.
 10. Settings -> Advanced: click `Check now` and verify that latest version, last check, download link, and changelog summary update without blocking Outlook.
 
 ## X-NCTALK-* property reference

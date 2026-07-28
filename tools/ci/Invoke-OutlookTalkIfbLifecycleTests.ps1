@@ -227,6 +227,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
+using Microsoft.Win32;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Services;
 
@@ -249,6 +250,7 @@ namespace NcTalkOutlookAddIn.Settings
         public string ServerUrl { get; set; }
         public string Username { get; set; }
         public string AppPassword { get; set; }
+        public string IfbPreviousFreeBusyPath { get; set; }
     }
 }
 
@@ -307,6 +309,7 @@ internal static class TalkIfbLifecycleTests
         TestPendingStoreMigration();
         TestSyncCoalescing();
         TestProtectedStateStoreCompatibility();
+        TestLegacyIfbRegistryMigration();
         TestDurableReplacement();
 
         if (failures > 0)
@@ -1070,6 +1073,126 @@ internal static class TalkIfbLifecycleTests
             && bytes[2] == 0xbf;
     }
 
+    private static void TestLegacyIfbRegistryMigration()
+    {
+        string root = NewTestRoot("ifb-upgrade");
+        string outlookVersion =
+            "NCConnectorTest" + Guid.NewGuid().ToString("N");
+        string registryRoot =
+            @"Software\Microsoft\Office\" + outlookVersion;
+        string calendarPath =
+            registryRoot + @"\Outlook\Options\Calendar";
+        string internetPath =
+            calendarPath + @"\Internet Free/Busy";
+        const string calendarValue = "FreeBusySearchPath";
+        const string internetValue = "Read URL";
+        const string legacyUrl =
+            "http://127.0.0.1:44777/nc-ifb/freebusy/%NAME%@example.org.vfb";
+        const string desiredUrl =
+            "http://127.0.0.1:44777/nc-ifb/new-token/freebusy/%NAME%@%SERVER%.vfb";
+        const string modernUrl =
+            "http://127.0.0.1:44777/nc-ifb/other-token/freebusy/%NAME%@%SERVER%.vfb";
+        const string externalUrl = "https://freebusy.example.org/path.vfb";
+
+        try
+        {
+            WriteRegistryValue(calendarPath, calendarValue, legacyUrl);
+            WriteRegistryValue(internetPath, internetValue, legacyUrl);
+            var legacySettings =
+                new NcTalkOutlookAddIn.Settings.AddinSettings
+                {
+                    IfbPreviousFreeBusyPath = string.Empty
+                };
+            var legacyManager = new IfbRegistryOwnershipManager(
+                root,
+                "legacy-upgrade");
+            legacyManager.Apply(
+                outlookVersion,
+                desiredUrl,
+                legacySettings);
+            Check(
+                "Legacy IFB values migrate without a stored predecessor",
+                ReadRegistryValue(calendarPath, calendarValue) == desiredUrl
+                && ReadRegistryValue(internetPath, internetValue) == desiredUrl);
+            legacyManager.Restore();
+            Check(
+                "Migrated IFB values without a predecessor are removed on restore",
+                ReadRegistryValue(calendarPath, calendarValue) == null
+                && ReadRegistryValue(internetPath, internetValue) == null);
+
+            WriteRegistryValue(calendarPath, calendarValue, modernUrl);
+            WriteRegistryValue(internetPath, internetValue, modernUrl);
+            bool rejectedModernValue = false;
+            try
+            {
+                new IfbRegistryOwnershipManager(root, "modern-value").Apply(
+                    outlookVersion,
+                    desiredUrl,
+                    new NcTalkOutlookAddIn.Settings.AddinSettings());
+            }
+            catch (InvalidOperationException)
+            {
+                rejectedModernValue = true;
+            }
+            Check(
+                "Unowned tokenized IFB values remain protected",
+                rejectedModernValue
+                && ReadRegistryValue(calendarPath, calendarValue) == modernUrl
+                && ReadRegistryValue(internetPath, internetValue) == modernUrl);
+
+            WriteRegistryValue(calendarPath, calendarValue, legacyUrl);
+            WriteRegistryValue(internetPath, internetValue, legacyUrl);
+            var externalSettings =
+                new NcTalkOutlookAddIn.Settings.AddinSettings
+                {
+                    IfbPreviousFreeBusyPath = externalUrl
+                };
+            var externalManager = new IfbRegistryOwnershipManager(
+                root,
+                "external-predecessor");
+            externalManager.Apply(
+                outlookVersion,
+                desiredUrl,
+                externalSettings);
+            externalManager.Restore();
+            Check(
+                "Legacy IFB migration restores its saved external predecessor",
+                ReadRegistryValue(calendarPath, calendarValue) == externalUrl
+                && ReadRegistryValue(internetPath, internetValue) == externalUrl);
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(registryRoot, false);
+            Directory.Delete(root, true);
+        }
+    }
+
+    private static void WriteRegistryValue(
+        string path,
+        string valueName,
+        string value)
+    {
+        using (RegistryKey key = Registry.CurrentUser.CreateSubKey(path))
+        {
+            key.SetValue(valueName, value, RegistryValueKind.String);
+        }
+    }
+
+    private static string ReadRegistryValue(
+        string path,
+        string valueName)
+    {
+        using (RegistryKey key = Registry.CurrentUser.OpenSubKey(path, false))
+        {
+            return key == null
+                ? null
+                : key.GetValue(
+                    valueName,
+                    null,
+                    RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+        }
+    }
+
     private static void TestDurableReplacement()
     {
         string root = Path.Combine(
@@ -1137,6 +1260,7 @@ internal static class TalkIfbLifecycleTests
         (Join-Path $SourceRoot "Services\TalkRoomLifecycleCoordinator.cs"),
         (Join-Path $SourceRoot "Services\TalkRoomLifecycleStore.cs"),
         (Join-Path $SourceRoot "Services\IfbRegistryStateStore.cs"),
+        (Join-Path $SourceRoot "Services\IfbRegistryOwnershipManager.cs"),
         (Join-Path $SourceRoot "Models\TalkAppointmentSyncSnapshot.cs"),
         (Join-Path $SourceRoot "Models\TalkRoomLifecycleRecord.cs"),
         (Join-Path $SourceRoot "Utilities\AppDataPaths.cs"),

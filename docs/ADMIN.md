@@ -129,6 +129,8 @@ Record the add-in version, Outlook bitness, Nextcloud version, and result of eac
 
 The MSI replaces an installed newer, equal, or older release. Per-user settings remain in the user profile.
 
+At the first enabled IFB start after an upgrade, NC Connector migrates only its legacy `/nc-ifb/freebusy/...` Outlook values to the protected current path. Existing external Outlook Free/Busy values remain unchanged. This migration concerns per-user Outlook values; it does not require deleting the HTTP URL reservation with `netsh`.
+
 The add-in reports release metadata but does not install updates. **Settings -> Advanced -> Inform me about new versions** controls the popup; the daily metadata check still runs when the popup is disabled. MSI approval and deployment remain administrator tasks.
 
 1. Close Outlook.
@@ -611,7 +613,7 @@ Reserved listener namespace:
 http://127.0.0.1:7777/nc-ifb/
 ```
 
-The MSI reserves the default URL namespace for authenticated Windows users. NC Connector adds a profile-specific random path segment to Outlook's Free/Busy URL; requests without that segment return `404`. The secret path is managed internally and is intentionally not shown in this guide.
+The MSI reserves the default URL namespace for authenticated Windows users. NC Connector adds a random path segment to Outlook's Free/Busy URL; requests without that segment return `404`. The secret path is managed internally and is intentionally not shown in this guide.
 
 Enabling IFB updates only Outlook's per-user Free/Busy values. Existing values and their types are recorded separately. Disabling IFB restores a value only while it still contains the value written by NC Connector; later administrator or application changes are left untouched. Values below `Software\Policies` are read for conflicts but are never written. The address-book cache is separated by Outlook profile, full Nextcloud base URL including any subpath, and canonical Nextcloud user ID.
 

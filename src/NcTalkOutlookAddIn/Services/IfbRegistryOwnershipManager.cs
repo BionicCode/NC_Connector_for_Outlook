@@ -103,10 +103,9 @@ namespace NcTalkOutlookAddIn.Services
             string previous = settings == null
                 ? string.Empty
                 : (settings.IfbPreviousFreeBusyPath ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(previous) || IsNcConnectorIfbUrl(previous))
-            {
-                return;
-            }
+            bool hasRecoverablePrevious =
+                !string.IsNullOrEmpty(previous)
+                && !IsNcConnectorIfbUrl(previous);
 
             bool changed = false;
             foreach (RegistryTarget target in targets)
@@ -118,18 +117,23 @@ namespace NcTalkOutlookAddIn.Services
                 RegistryValueSnapshot current = ReadValue(
                     target.UserPath,
                     target.ValueName);
-                if (!current.Exists || !IsNcConnectorIfbUrl(current.Value))
+                if (!current.Exists
+                    || !IsLegacyNcConnectorIfbUrl(current.Value))
                 {
                     continue;
                 }
 
+                // A pre-3.3.1 endpoint proves an upgrade. Without a saved external
+                // value, removing it on disable is safer than restoring stale Connector data.
                 _state.Ownership.Add(new IfbRegistryOwnership
                 {
                     RegistryPath = target.UserPath,
                     ValueName = target.ValueName,
-                    OriginalExists = true,
+                    OriginalExists = hasRecoverablePrevious,
                     OriginalKind = (int)RegistryValueKind.String,
-                    OriginalValue = previous,
+                    OriginalValue = hasRecoverablePrevious
+                        ? previous
+                        : string.Empty,
                     WrittenValue = current.Value
                 });
                 changed = true;
@@ -139,8 +143,14 @@ namespace NcTalkOutlookAddIn.Services
             if (changed)
             {
                 _stateStore.Save(_state);
+                DiagnosticsLogger.Log(
+                    LogCategories.Ifb,
+                    "Migrated legacy NC Connector IFB registry values to the ownership journal.");
+                if (settings != null)
+                {
+                    settings.IfbPreviousFreeBusyPath = string.Empty;
+                }
             }
-            settings.IfbPreviousFreeBusyPath = string.Empty;
         }
 
         private void ApplyTarget(RegistryTarget target, string desired)
@@ -343,6 +353,23 @@ namespace NcTalkOutlookAddIn.Services
         internal static bool IsNcConnectorIfbUrl(string value)
         {
             Uri uri;
+            return TryGetNcConnectorIfbUri(value, out uri);
+        }
+
+        internal static bool IsLegacyNcConnectorIfbUrl(string value)
+        {
+            Uri uri;
+            return TryGetNcConnectorIfbUri(value, out uri)
+                   && uri.AbsolutePath.StartsWith(
+                       "/nc-ifb/freebusy/",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool TryGetNcConnectorIfbUri(
+            string value,
+            out Uri uri)
+        {
+            uri = null;
             return !string.IsNullOrWhiteSpace(value)
                    && Uri.TryCreate(value.Trim(), UriKind.Absolute, out uri)
                    && uri.IsLoopback

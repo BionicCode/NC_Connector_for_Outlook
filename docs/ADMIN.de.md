@@ -129,6 +129,8 @@ Add-in-Version, Outlook-Bitness, Nextcloud-Version und das Ergebnis jedes Schrit
 
 Die MSI ersetzt eine installierte neuere, gleiche oder ältere Version. Benutzerspezifische Einstellungen bleiben im Benutzerprofil erhalten.
 
+Beim ersten Start mit aktiviertem IFB nach einem Upgrade migriert NC Connector nur seine alten Outlook-Werte im Format `/nc-ifb/freebusy/...` auf den aktuellen geschützten Pfad. Vorhandene externe Outlook-Free/Busy-Werte bleiben unverändert. Diese Migration betrifft benutzerspezifische Outlook-Werte; ein Löschen der HTTP-URL-Reservierung mit `netsh` ist dafür nicht erforderlich.
+
 Das Add-in meldet Release-Metadaten, installiert aber keine Updates. **Einstellungen -> Erweitert -> Über neue Versionen informieren** steuert das Popup; die tägliche Metadatenabfrage läuft auch bei deaktiviertem Popup. Freigabe und Verteilung der MSI bleiben Aufgaben der Administration.
 
 1. Outlook schließen.
@@ -611,7 +613,7 @@ Reservierter Listener-Namespace:
 http://127.0.0.1:7777/nc-ifb/
 ```
 
-Die MSI reserviert den Standard-URL-Namespace für authentifizierte Windows-Benutzer. NC Connector ergänzt die Outlook-Free/Busy-URL um ein zufälliges profilspezifisches Pfadsegment; Anfragen ohne dieses Segment erhalten `404`. Der geheime Pfad wird intern verwaltet und in dieser Anleitung bewusst nicht angezeigt.
+Die MSI reserviert den Standard-URL-Namespace für authentifizierte Windows-Benutzer. NC Connector ergänzt die Outlook-Free/Busy-URL um ein zufälliges Pfadsegment; Anfragen ohne dieses Segment erhalten `404`. Der geheime Pfad wird intern verwaltet und in dieser Anleitung bewusst nicht angezeigt.
 
 Beim Aktivieren von IFB werden nur benutzerspezifische Outlook-Free/Busy-Werte aktualisiert. Vorhandene Werte und Typen werden getrennt erfasst. Beim Deaktivieren stellt NC Connector einen Wert nur wieder her, solange er noch den von NC Connector geschriebenen Inhalt hat; spätere Änderungen durch Administratoren oder andere Anwendungen bleiben unangetastet. Werte unter `Software\Policies` werden nur auf Konflikte geprüft und nie geschrieben. Der Adressbuch-Cache ist nach Outlook-Profil, vollständiger Nextcloud-Basis-URL einschließlich Unterpfad und kanonischer Nextcloud-Benutzer-ID getrennt.
 
