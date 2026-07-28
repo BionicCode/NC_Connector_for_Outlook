@@ -66,6 +66,8 @@ namespace NcTalkOutlookAddIn
                     return;
                 }
 
+                // AfterWrite covers Save, AutoSave, and Send. The share now belongs to a
+                // persisted message and must not be removed after a later discard.
                 int released = _shareCleanupTracker.ReleaseAll();
                 if (released == 0)
                 {

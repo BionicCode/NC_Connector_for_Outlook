@@ -134,6 +134,8 @@ namespace NcTalkOutlookAddIn
                     LogTalk("BeforeDelete ignored (no token).");
                     return;
                 }
+                // An attendee can delete only a calendar copy. The organizer owns the room
+                // shared by the appointment's other participants.
                 if (!_owner.IsOrganizer(_appointment))
                 {
                     LogTalk("BeforeDelete ignored (not organizer, token=" + _roomToken + ").");
@@ -171,6 +173,8 @@ namespace NcTalkOutlookAddIn
 
             private bool IsRoomDeletionAllowedForRecurrence()
             {
+                // An occurrence or exception shares its series room. Removing one must not
+                // tear down the room used by the remaining series.
                 try
                 {
                     Outlook.OlRecurrenceState recurrenceState =

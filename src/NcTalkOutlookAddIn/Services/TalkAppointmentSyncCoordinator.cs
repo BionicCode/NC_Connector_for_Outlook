@@ -69,6 +69,8 @@ namespace NcTalkOutlookAddIn.Services
 
             if (startWorker)
             {
+                // Snapshots contain no Outlook COM objects, so remote updates can run
+                // outside the Outlook STA.
                 Task.Run(() => ProcessAsync(key));
             }
         }

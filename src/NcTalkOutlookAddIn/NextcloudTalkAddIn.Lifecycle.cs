@@ -46,6 +46,8 @@ namespace NcTalkOutlookAddIn
                 outlookProfileName);
             _freeBusyManager.Initialize(_outlookApplication);
             InitializeTalkAppointmentSync(outlookProfileName);
+            // Startup resumes durable deletion jobs. It does not enumerate calendars
+            // to rebuild subscriptions.
             InitializeTalkRoomLifecycle(
                 _settingsStorage.DataDirectory,
                 outlookProfileName);

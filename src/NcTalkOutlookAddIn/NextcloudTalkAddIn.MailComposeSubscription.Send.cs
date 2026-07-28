@@ -30,6 +30,8 @@ namespace NcTalkOutlookAddIn
                     return;
                 }
 
+                // Send provides the final account and recipients. The primary may then stay
+                // in Outbox, so password delivery follows this action, not later transport.
                 CapturePasswordDispatchRecipients();
                 CapturePasswordDispatchSender();
 
@@ -40,6 +42,8 @@ namespace NcTalkOutlookAddIn
                     var queue =
                         new List<SeparatePasswordDispatchEntry>(
                             _passwordDispatchQueue);
+                    // Clear before submission: an ambiguous Outlook result must not create
+                    // a second password mail.
                     _passwordDispatchQueue.Clear();
                     LogFileLink(
                         "Separate password direct dispatch triggered by primary send (composeKey="

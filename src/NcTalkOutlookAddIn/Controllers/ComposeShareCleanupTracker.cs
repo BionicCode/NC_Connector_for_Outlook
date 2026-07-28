@@ -9,6 +9,8 @@ using NcTalkOutlookAddIn.Models;
 namespace NcTalkOutlookAddIn.Controllers
 {
     // Tracks shares that Outlook has not written with the compose item yet.
+    // It deliberately has no persistent store: deleting a saved draft later
+    // does not prove its share is unused.
     internal sealed class ComposeShareCleanupTracker
     {
         private readonly List<ComposeShareCleanupRecord> _records =

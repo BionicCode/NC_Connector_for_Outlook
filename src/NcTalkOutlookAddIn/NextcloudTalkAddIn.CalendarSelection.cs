@@ -8,8 +8,9 @@ using Outlook = Microsoft.Office.Interop.Outlook;
 
 namespace NcTalkOutlookAddIn
 {
-    // Rebinds only calendar appointments that the user selects in an Explorer.
-    // This preserves calendar-view deletion without scanning stores, folders, or item collections.
+    // Binds only selected calendar appointments.
+    // This keeps calendar-view deletion working after restart without opening every
+    // Outlook store, folder, or item at startup.
     public sealed partial class NextcloudTalkAddIn
     {
         private void OnExplorerSelectionChanged(string explorerKey)

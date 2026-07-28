@@ -129,6 +129,8 @@ namespace NcTalkOutlookAddIn.Services
 
                     record.AttemptCount = 0;
                     record.NextAttemptUtc = DateTime.UtcNow;
+                    // Persist before scheduling so restart retries observed deletions
+                    // without scanning Outlook calendars.
                     SaveLocked();
                 }
 
@@ -283,6 +285,8 @@ namespace NcTalkOutlookAddIn.Services
                 }
                 BindAccountId(record.Id, accountId);
 
+                // Saved appointment deletion stays opt-in until execution because the setting
+                // may change after Outlook recorded the deletion event.
                 if (record.PolicyRequired)
                 {
                     if (!policyChecked)

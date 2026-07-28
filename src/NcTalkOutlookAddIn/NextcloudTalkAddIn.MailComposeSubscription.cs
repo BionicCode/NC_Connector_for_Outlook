@@ -91,6 +91,8 @@ namespace NcTalkOutlookAddIn
             private readonly System.Windows.Forms.Timer _emailSignatureTimer = new System.Windows.Forms.Timer();
             private readonly List<AttachmentBatchEntry> _pendingAddedBatch = new List<AttachmentBatchEntry>();
             private readonly List<BeforeAddShareEntry> _pendingBeforeAddShareEntries = new List<BeforeAddShareEntry>();
+            // Final recipients and sender are captured at Send time. A reopened draft can
+            // change both, so password follow-ups stay with the live compose subscription.
             private readonly List<SeparatePasswordDispatchEntry> _passwordDispatchQueue = new List<SeparatePasswordDispatchEntry>();
             private AttachmentAutomationSettings _attachmentAutomationSettingsSnapshot;
             private DateTime _attachmentAutomationSettingsSnapshotUtc;
