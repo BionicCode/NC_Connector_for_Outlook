@@ -26,3 +26,7 @@ dist/
 # Local NuGet package cache (machine-specific)
 packages/
 .ci/
+
+# AI
+AGENT*.md
+DOCUMENTATION.md
