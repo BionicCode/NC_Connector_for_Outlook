@@ -50,9 +50,6 @@ function Add-UiDialogBoundaryFailures {
     }
 }
 
-$allowedGetResult = @(
-    "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.MailComposeSubscription.AttachmentFlow.cs"
-)
 $allowedWait = @(
     "src\NcTalkOutlookAddIn\Services\FreeBusyServer.cs"
 )
@@ -64,11 +61,13 @@ foreach ($file in $sourceFiles) {
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
 
-        if ($line -match '\.GetAwaiter\(\)\.GetResult\(\)' -and $relative -notin $allowedGetResult) {
-            $failures.Add("${relative}:$($i + 1) uses GetAwaiter().GetResult() outside the documented BeforeAttachmentAdd sync boundary.")
+        if ($line -match '\.GetAwaiter\(\)\.GetResult\(\)') {
+            $failures.Add("${relative}:$($i + 1) uses GetAwaiter().GetResult() in runtime code.")
         }
 
-        if ($line -match '\.Wait\s*\(' -and $relative -notin $allowedWait) {
+        if ($line -match '\.Wait\s*\(' -and
+            $line -notmatch '\.Wait\s*\(\s*0\s*\)' -and
+            $relative -notin $allowedWait) {
             $failures.Add("${relative}:$($i + 1) uses Task.Wait() outside the listener shutdown path.")
         }
 

@@ -4,6 +4,32 @@ All notable changes to **NC Connector for Outlook** will be documented in this f
 
 This project follows the principles of **Keep a Changelog** and **Semantic Versioning**.
 
+## [3.3.1] - 2026-07-27
+
+### Added
+- The FileLink wizard now shows MD5 checksum progress while preparing Nextcloud bulk uploads.
+
+### Changed
+- Talk appointment tracking now binds only selected or opened NC Connector appointments. Outlook startup no longer enumerates stores, calendar folders, or calendar items.
+
+### Fixed
+- Settings are validated and stored before live runtime changes are applied. Malformed settings XML can recover from the last valid backup; an unreadable protected app password clears only that password and retains the other readable values.
+- TLS selections now take effect in Outlook's host AppDomain.
+- Nextcloud-provided login and password-policy endpoints are accepted only on the configured HTTPS origin, and update downloads only from the official GitHub release path. Credentials and share, Talk, and Secrets tokens are redacted from logs.
+- Locally saved FileLink defaults remain active when backend fields are editable; locked backend values still win.
+- Backend custom share templates remove the surrounding block for empty URL, password, expiration, permissions, and note placeholders in HTML and plain-text output.
+- When share-block insertion fails or an unsaved compose message is discarded before its first successful write, NC Connector attempts to remove the newly created FileLink server folder.
+- Ambiguous FileLink folder and public-share creation is recovered only after an exact DAV or OCS path match, avoiding numbered orphan folders and unrelated recovered links.
+- Outlook attachments marked as hidden, such as signature images, remain in the message and are excluded from FileLink routing.
+- Separate password follow-up mails are submitted directly from the primary message's Send action without an intermediate draft. A definite automatic-send failure opens a fully prepared manual fallback; an ambiguous submission is not repeated.
+- IFB preserves NC Connector-owned registry values, scopes caches by Outlook profile, normalized Nextcloud URL, and configured login, protects its loopback endpoint with a random per-run path token, and resolves attendees by full SMTP address and attendee domain.
+- Nextcloud updates for subscribed organizer appointments run outside Outlook's UI thread. Selecting or opening a Talk appointment after restart binds calendar-view deletion again, and successfully persisted room-deletion jobs are retried after transient failures or Outlook restarts.
+
+### Product boundaries
+- Separate password delivery belongs to the open compose session that created the share. Saving while it remains open is supported; closing and reopening a draft or `.oft` template, or restarting Outlook, does not restore the follow-up state. Clicking **Send** submits the follow-up immediately; it does not wait for delayed or offline primary delivery or server acceptance, and a follow-up failure does not cancel the primary send.
+- Automatic FileLink cleanup is tracked in memory only until Outlook's first successful write after share insertion. Saved or AutoSaved drafts retain the share, deleting a saved draft is not tracked, and failed cleanup is not retried after Outlook restarts.
+- Remote Talk room deletion is opt-in and requires NC Connector token metadata, organizer eligibility, and a non-recurring appointment or series master. Only selected or opened appointments are bound; only successfully stored deletion jobs survive restart. Deleting one occurrence or exception does not remove the shared room.
+
 ## [3.3.0] - 2026-07-24
 
 ### Added

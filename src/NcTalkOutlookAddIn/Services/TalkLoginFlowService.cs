@@ -4,9 +4,7 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Net;
-using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 using NcTalkOutlookAddIn.Utilities;
@@ -23,7 +21,10 @@ namespace NcTalkOutlookAddIn.Services
 
         internal TalkLoginFlowService(string baseUrl)
         {
-            _baseUrl = (baseUrl ?? string.Empty).Trim().TrimEnd('/');
+            string normalizedBaseUrl;
+            _baseUrl = NextcloudUriValidator.TryNormalizeBaseUrl(baseUrl, out normalizedBaseUrl)
+                ? normalizedBaseUrl
+                : string.Empty;
         }
 
         internal LoginFlowStart StartLoginFlow()
@@ -58,11 +59,18 @@ namespace NcTalkOutlookAddIn.Services
             {
                 throw new TalkServiceException("Login flow response is incomplete.", false, HttpStatusCode.InternalServerError, null);
             }
-            if (!pollEndpoint.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            string trustedLoginUrl;
+            string trustedPollEndpoint;
+            if (!NextcloudUriValidator.TryResolveSameOriginHttpsUrl(loginUrl, _baseUrl, out trustedLoginUrl)
+                || !NextcloudUriValidator.TryResolveSameOriginHttpsUrl(pollEndpoint, _baseUrl, out trustedPollEndpoint))
             {
-                pollEndpoint = _baseUrl + pollEndpoint;
+                throw new TalkServiceException(
+                    "Login flow response contains an untrusted endpoint.",
+                    false,
+                    HttpStatusCode.BadGateway,
+                    null);
             }
-            return new LoginFlowStart(loginUrl, pollEndpoint, pollToken);
+            return new LoginFlowStart(trustedLoginUrl, trustedPollEndpoint, pollToken);
             }
         }
 
@@ -75,6 +83,19 @@ namespace NcTalkOutlookAddIn.Services
 
             using (DiagnosticsLogger.BeginOperation(LogCategories.Api, "LoginFlow.Complete"))
             {
+                string trustedPollEndpoint;
+                if (!NextcloudUriValidator.TryResolveSameOriginHttpsUrl(
+                        start.PollEndpoint,
+                        _baseUrl,
+                        out trustedPollEndpoint))
+                {
+                    throw new TalkServiceException(
+                        "Login flow poll endpoint is no longer trusted.",
+                        false,
+                        HttpStatusCode.BadRequest,
+                        null);
+                }
+
                 DateTime expire = DateTime.UtcNow + (timeout <= TimeSpan.Zero ? TimeSpan.FromMinutes(2) : timeout);
                 TimeSpan interval = pollInterval <= TimeSpan.Zero ? TimeSpan.FromSeconds(2) : pollInterval;
 
@@ -87,7 +108,7 @@ namespace NcTalkOutlookAddIn.Services
                     string payload = _serializer.Serialize(payloadObject);
                     HttpStatusCode statusCode;
                     string responseText;
-                    IDictionary<string, object> response = ExecuteRequest(start.PollEndpoint, "POST", payload, out statusCode, out responseText);
+                    IDictionary<string, object> response = ExecuteRequest(trustedPollEndpoint, "POST", payload, out statusCode, out responseText);
 
                     if (statusCode == HttpStatusCode.NotFound)
                     {

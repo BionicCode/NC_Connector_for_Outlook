@@ -43,7 +43,16 @@ namespace NcTalkOutlookAddIn.Utilities
 
         internal static bool OpenUrl(string url, string logCategory, string failureContext)
         {
-            return OpenTarget(url, logCategory, failureContext ?? "Failed to open URL.");
+            string normalizedUrl;
+            if (!NextcloudUriValidator.TryNormalizeHttpsUrl(url, out normalizedUrl))
+            {
+                DiagnosticsLogger.Log(
+                    logCategory,
+                    (failureContext ?? "Failed to open URL.") + " URL rejected because it is not a valid HTTPS URL.");
+                return false;
+            }
+
+            return OpenTarget(normalizedUrl, logCategory, failureContext ?? "Failed to open URL.");
         }
     }
 }

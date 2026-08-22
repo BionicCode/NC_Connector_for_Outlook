@@ -11,6 +11,9 @@ try {
     $testSource = Join-Path $TempRoot "OutlookTemplateSanitizerTests.cs"
     @'
 using System;
+using System.IO;
+using System.Reflection;
+using System.Text;
 using NcTalkOutlookAddIn.Utilities;
 
 namespace NcTalkOutlookAddIn.Utilities
@@ -45,7 +48,9 @@ internal static class OutlookTemplateSanitizerTests
 
     public static int Main()
     {
+        TestResolverBoundaries();
         TestShareTemplateSanitizer();
+        TestDeeplyNestedTemplateSanitizer();
         TestEmailSignatureSanitizer();
         TestTalkAppointmentCompatibilityTransform();
 
@@ -56,6 +61,25 @@ internal static class OutlookTemplateSanitizerTests
         }
         Console.WriteLine("All Outlook template sanitizer tests passed.");
         return 0;
+    }
+
+    private static void TestDeeplyNestedTemplateSanitizer()
+    {
+        var payload = new StringBuilder();
+        for (int i = 0; i < 513; i++)
+        {
+            payload.Append("<div>");
+        }
+        payload.Append("<template><script>alert(1)</script><img src=\"x\" onerror=\"alert(2)\"></template>");
+        for (int i = 0; i < 513; i++)
+        {
+            payload.Append("</div>");
+        }
+
+        string sanitized = HtmlTemplateSanitizer.SanitizeShareTemplateHtml(payload.ToString());
+        Check("Deep nesting removes template elements", !sanitized.Contains("<template"), sanitized);
+        Check("Deep nesting removes script elements", !sanitized.Contains("<script"), sanitized);
+        Check("Deep nesting removes event handlers", !sanitized.Contains("onerror"), sanitized);
     }
 
     private static void TestShareTemplateSanitizer()
@@ -85,6 +109,68 @@ internal static class OutlookTemplateSanitizerTests
         Check("Talk appointment transform strips border radius", !prepared.Contains("border-radius"), prepared);
         Check("Talk appointment transform keeps link", prepared.Contains("https://example.test"), prepared);
     }
+
+    private static void TestResolverBoundaries()
+    {
+        MethodInfo resolver = typeof(HtmlTemplateSanitizer).GetMethod(
+            "ResolveSanitizerDependency",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Check("Sanitizer dependency resolver is available", resolver != null);
+        if (resolver == null)
+        {
+            return;
+        }
+
+        Assembly codePages = Assembly.LoadFrom(
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "System.Text.Encoding.CodePages.dll"));
+        const string memoryPrefix = "System.Memory, Version=";
+        const string memorySuffix =
+            ", Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51";
+
+        Assembly resolved = InvokeResolver(
+            resolver,
+            memoryPrefix + "4.0.1.1" + memorySuffix,
+            codePages);
+        Check(
+            "Known sanitizer dependency request resolves to packaged System.Memory",
+            resolved != null && resolved.GetName().Version == new Version(4, 0, 5, 0),
+            resolved == null ? "null" : resolved.FullName);
+
+        Check(
+            "Higher dependency versions are not redirected",
+            InvokeResolver(resolver, memoryPrefix + "99.0.0.0" + memorySuffix, codePages) == null);
+        Check(
+            "Wrong dependency public key tokens are not redirected",
+            InvokeResolver(
+                resolver,
+                memoryPrefix + "4.0.1.1, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+                codePages) == null);
+        Check(
+            "Non-neutral dependency cultures are not redirected",
+            InvokeResolver(
+                resolver,
+                memoryPrefix + "4.0.1.1, Culture=de-DE, PublicKeyToken=cc7b13ffcd2ddd51",
+                codePages) == null);
+        Check(
+            "Unrelated requesting assemblies are not redirected",
+            InvokeResolver(resolver, memoryPrefix + "4.0.1.1" + memorySuffix, typeof(string).Assembly) == null);
+        Check(
+            "Requests without a requesting assembly are not redirected",
+            InvokeResolver(resolver, memoryPrefix + "4.0.1.1" + memorySuffix, null) == null);
+        Check(
+            "Unknown dependency names are not redirected",
+            InvokeResolver(
+                resolver,
+                "Unrelated.Dependency, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+                codePages) == null);
+    }
+
+    private static Assembly InvokeResolver(MethodInfo resolver, string requestedName, Assembly requester)
+    {
+        return resolver.Invoke(
+            null,
+            new object[] { null, new ResolveEventArgs(requestedName, requester) }) as Assembly;
+    }
 }
 '@ | Set-Content -Path $testSource -Encoding UTF8
 
@@ -101,6 +187,7 @@ internal static class OutlookTemplateSanitizerTests
     $references = @(
         "/reference:System.dll",
         "/reference:System.Core.dll",
+        "/reference:System.Numerics.dll",
         "/reference:System.Web.dll"
     )
     Get-ChildItem -Path $vendorDir -Filter "*.dll" | ForEach-Object {

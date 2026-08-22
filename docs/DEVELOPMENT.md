@@ -28,22 +28,11 @@ The add-in connects Outlook classic to a Nextcloud server and provides:
 - **Central backend email signatures** for matching Outlook sender accounts
 - **Internet Free/Busy (IFB)** via a local HTTP endpoint that proxies requests to Nextcloud
 
-## Release 3.1.0 delta summary
-
-This release expands Outlook compose support and central backend signatures:
-
-- Backend-managed email signatures apply to matching Outlook sender identities in HTML/RTF and plain-text compose, including replies and forwards.
-- Nextcloud share insertion is available from inline replies/forwards and uses WordEditor insertion so quoted content stays intact.
-- Plain-text share blocks are inserted without rewriting `MailItem.Body`.
-- Large files use Nextcloud chunked WebDAV upload v2 and the sharing wizard shows per-file upload speed.
-- Separate password follow-up mails keep the original sender identity, receive the backend signature when policy and sender match, and still open a manual fallback draft if auto-send fails.
-- Talk room deletion for saved appointments remains opt-in and Talk cleanup metadata stays local to Outlook.
-
 ## Quick start
 
 ### Prerequisites
 
-- Windows 10/11
+- Windows 10/11 (64-bit)
 - Outlook classic (x64 or x86)
 - **.NET Framework 4.7.2** (target framework)
 - MSBuild (e.g. Visual Studio Build Tools)
@@ -94,24 +83,34 @@ Top-level:
 - `assets/` — branding images used in README/screenshots
 - `dist/` — build output (MSI)
 
+## Architecture
+
+### Main building blocks
+
 Key code locations:
 
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.cs` — entry point, ribbon XML, Outlook event wiring, orchestration
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.Lifecycle.cs` — add-in bootstrap/teardown lifecycle (`OnConnection`, shutdown/disconnect)
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.Hooks.cs` — dedicated Outlook event hook/unhook wiring helpers
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.CalendarSelection.cs` — selected-appointment rebinding for calendar-view deletion without a calendar scan
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.Logging.cs` — category-specific runtime logging helpers
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.PolicyTemplates.cs` — backend policy + Talk template/language resolver helpers
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.SubscriptionEnsure.cs` — deferred appointment-subscription ensure and Outlook event-restriction handling
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.cs` — compose subscription core state + lifecycle entry points (`Dispose`, identity, shared helpers)
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.AttachmentFlow.cs` — compose attachment interception/evaluation/share-launch flow
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Signature.cs` — backend email-signature policy application for the matching Outlook sender account
-- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs` — send/close cleanup lifecycle + separate-password dispatch handling
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Send.cs` — send gate, final recipient/account capture, and direct separate-password dispatch
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.ShareCleanup.cs` — `AfterWrite`, `Inspector.Close`, and inline `Unload` handling for newly inserted shares
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.ComposeLifecycle.cs` — composition-root bridge for queued share cleanup and direct password dispatch
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.AppointmentSubscription.cs` — appointment runtime subscription lifecycle
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkAppointmentSync.cs` — STA capture and background dispatch for appointment changes
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkRoomLifecycle.cs` — startup, retry recovery, and teardown for queued Talk room deletions
 - `src/NcTalkOutlookAddIn/Controllers/SettingsWorkflowController.cs` — settings open/save/revert orchestration
 - `src/NcTalkOutlookAddIn/Controllers/FileLinkLaunchController.cs` — FileLink ribbon launch + wizard orchestration
 - `src/NcTalkOutlookAddIn/Controllers/TalkRibbonController.cs` — Talk ribbon flow orchestration (auth gate, wizard, room create/replace)
-- `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` — appointment lifecycle orchestration for Talk room metadata/sync
-- `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` — compose share cleanup + separate-password dispatch flow
+- `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` with its `Sync` partial — appointment metadata, local snapshot capture, and remote room updates
+- `src/NcTalkOutlookAddIn/Controllers/ComposeShareCleanupTracker.cs` — in-memory pending-write state for newly inserted compose shares
+- `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` — exact-origin deletion of unpersisted or insertion-failed server artifacts, plus password-mail body, recipient, sender, Secrets, and signature preparation
 - `src/NcTalkOutlookAddIn/Controllers/TalkDescriptionTemplateController.cs` — Talk template/body block rendering
 - `src/NcTalkOutlookAddIn/Controllers/OutlookRecipientResolverController.cs` — SMTP and attendee recipient resolution
 - `src/NcTalkOutlookAddIn/Controllers/MailComposeSubscriptionRegistryController.cs` — compose-subscription registry lifecycle
@@ -122,15 +121,21 @@ Key code locations:
   - All runtime HTTP calls (Talk, share/DAV, IFB, login flow, moderator avatar fetch) are routed through `NcHttpClient`.
   - `Services/EmailSignaturePolicyService.cs` resolves backend email-signature policy values against local settings and lock state.
   - `Services/UpdateCheckService.cs` checks `nc-connector.de` once per day for Outlook release metadata and stores the cached result in profile settings.
+  - `Services/TalkAppointmentSyncCoordinator.cs` coalesces background Talk updates captured from Outlook events.
+  - `Services/TalkRoomLifecycleCoordinator.cs` and `TalkRoomLifecycleStore.cs` persist and retry queued room deletions without scanning Outlook calendars.
+  - `Services/IfbRegistryOwnershipManager.cs` and `IfbRegistryStateStore.cs` own IFB registry recovery; `FreeBusyServer.cs` validates the secret request path and limits concurrent requests.
+  - `Services/ProtectedJsonStateStore.cs` provides the shared DPAPI-protected JSON and backup-recovery path used by the Talk deletion queue and IFB registry ownership state. Writes prefer atomic replacement and retain the established copy fallback; the typed stores retain feature-specific file names, entropy, validation, and diagnostics.
 - `src/NcTalkOutlookAddIn/UI/` — WinForms dialogs and wizards
   - `UI/ScaledForm.cs` is the shared DPI-scaling base for forms that use logical pixel layout helpers.
 - `src/NcTalkOutlookAddIn/Settings/` — persisted settings model, storage, and managed setup policy
   - `Settings/ManagedSetupPolicy.cs` reads the managed Nextcloud URL from Windows policy registry keys.
+  - `Settings/SettingsFileTransaction.cs` serializes profile writes through a named mutex and replaces a validated settings file while retaining its last valid backup.
 - `src/NcTalkOutlookAddIn/Utilities/` — logging, theming, i18n, small shared helpers
-- `src/NcTalkOutlookAddIn/Utilities/HtmlTemplateSanitizer.cs` — centralized sanitizer for backend-provided share/talk HTML templates
+- `src/NcTalkOutlookAddIn/Utilities/HtmlTemplateSanitizer.cs` — centralized HtmlSanitizer 9.0.892 policy for backend-provided share/talk HTML; active-content containers such as `template` are removed
 - `src/NcTalkOutlookAddIn/Utilities/HtmlToPlainTextConverter.cs` — DOM-based HTML-to-plain-text rendering for plain-text email signatures
 - `src/NcTalkOutlookAddIn/Utilities/NcJson.cs` — centralized JSON payload normalization (`PrepareJsonPayload`), dictionary/string/int helpers, and OCS error extraction
 - `src/NcTalkOutlookAddIn/Utilities/DeferredAppointmentEnsureState.cs` — encapsulated pending-key tracking + throttled logging state for deferred appointment ensure
+- `src/NcTalkOutlookAddIn/Utilities/NextcloudUriValidator.cs` — HTTPS base-URL validation and same-origin validation for server-supplied endpoints
 - `src/NcTalkOutlookAddIn/Utilities/PictureConverter.cs` — shared Image -> IPictureDisp conversion helper for ribbon icons
 
 #### Central email signature flow (mail compose)
@@ -159,12 +164,8 @@ Runtime rules:
 - Signature processing only runs for unsent Outlook compose items. Opening a received or already sent message for reading must never modify its body.
 - Before send, the pending debounce is stopped and the current sender, format, compose kind, policy, and managed slot are reconciled synchronously. With complete backend connection settings, sending is cancelled if no successful policy snapshot is available or if a required apply/clear operation cannot finish safely. The compose item stays open for correction and retry.
 - An incomplete backend setup does not create a signature requirement; cleanup is limited to best-effort removal of an exact `NcConnectorSignature` bookmark. An unsupported signature domain disables insertion as well, but with otherwise complete backend settings an existing managed range must still reconcile safely at send time. An `InlineResponseClose` that arrives just before send does not by itself block a previously reconciled, unchanged message.
-- Separate password follow-up dispatch reuses the successful policy snapshot already verified for the primary send, sanitizes it once, and uses it for the complete queue. It applies and reads back `SendUsingAccount`/`SentOnBehalfOfName`, auto-sends only when the effective follow-up identity equals the sender captured from the successful primary mail, and adds the backend signature only when that effective identity also matches `policy.email_signature.user_email`. Plain source mail produces a plain follow-up; HTML/RTF source produces an HTML follow-up. The same snapshot is used for a manual fallback draft.
+- Separate password follow-up dispatch captures the successful policy and settings snapshot at share creation. On the primary mail's `Send` event it applies and reads back `SendUsingAccount`/`SentOnBehalfOfName`, submits only when the effective follow-up identity equals the captured primary sender, and adds the backend signature only when that identity also matches `policy.email_signature.user_email`. Plain source mail produces a plain follow-up; HTML/RTF source produces an HTML follow-up. A definite automatic-send failure displays the fully prepared message for manual delivery; an ambiguous submission is never repeated.
 - Debug logging records the trigger, active surface, body format, compose kind, slot source, and reconciliation result without writing the signature template or sender address.
-
-## Architecture
-
-### Main building blocks
 
 - **COM add-in lifecycle**
   - `NextcloudTalkAddIn.OnConnection(...)` loads settings, enables logging (optional), initializes IFB, and wires Outlook events.
@@ -193,7 +194,7 @@ Runtime rules:
   - `UI/BrandedHeader.cs` is the shared header banner control and provides `AttachToParent(...)` for consistent form header setup.
   - `UI/ScaledForm.cs` centralizes `ScaleLogical(...)` so form-level DPI wrappers are not duplicated.
 - **Shared utilities**
-  - `Utilities/BrowserLauncher.cs` centralizes shell target starts (URLs, files, directories).
+  - `Utilities/BrowserLauncher.cs` centralizes shell target starts for files and directories; `OpenUrl` rejects non-HTTPS targets.
   - `Utilities/SizeFormatting.cs` centralizes adaptive byte, transfer-rate, and MB display formatting.
   - `Utilities/ComInteropScope.cs` centralizes COM release/final-release patterns.
   - `Utilities/PasswordGenerationHelper.cs` centralizes password-policy min-length resolution, server-policy generation fallback, and shared minimum-length validation for Talk/FileLink forms.
@@ -202,10 +203,14 @@ Runtime rules:
 
 ### Runtime configuration and policy processing
 
-- `Settings/SettingsStorage.cs` selects a profile-specific XML file below `%LOCALAPPDATA%\NC4OL`, applies defaults for missing values, and protects the app password with Windows DPAPI in `CurrentUser` scope. Its migration path copies legacy INI values into the profile files and removes legacy files only after every target write succeeds.
+- `Settings/SettingsStorage.cs` selects a profile-specific XML file below `%LOCALAPPDATA%\NC4OL`, applies defaults for missing values, and protects the app password with Windows DPAPI in `CurrentUser` scope. `SettingsFileTransaction` writes and validates a temporary file under a cross-process profile mutex, then replaces the primary file and retains the previous valid file as `.bak`.
+- A malformed password value clears only the password and blocks background settings writes. A malformed primary XML falls back to the valid backup. When no valid file remains, automatic writes stay blocked until an explicit Settings save succeeds. Runtime settings change only after that user-initiated save commits.
+- `SettingsWorkflowController` persists the candidate configuration before applying runtime, TLS, or IFB changes. A write failure keeps the dialog open and displays the localized save error.
 - `Settings/ManagedSetupPolicy.cs` reads `HKLM` before `HKCU` and, on 64-bit Windows, the 64-bit registry view before the 32-bit view. An unlocked URL fills an empty profile; a locked URL overrides the profile value.
+- `Utilities/NextcloudUriValidator.cs` accepts only HTTPS Nextcloud base URLs without user information, query, or fragment. Login-flow and password-policy URLs supplied by a server must keep the configured scheme, host, and port.
 - `Services/BackendPolicyService.cs` reads the optional backend status for Settings, Talk, FileLink, managed-signature, and saved-appointment deletion flows. Share and Talk can resolve to local values when the backend or seat is unavailable. The managed-signature send gate uses the stricter policy state described in the signature flow above.
-- The TLS setting is applied through `ServicePointManager.SecurityProtocol`. Connection tests and login-flow diagnostics request a fresh connection through `NcHttpClient`, so a changed TLS mode is tested with a new handshake instead of an existing pooled connection. Other runtime HTTP calls continue to use the shared request executor.
+- The TLS setting is applied through `ServicePointManager.SecurityProtocol`. Before that assignment, `TransportSecurityConfigurator` sets the .NET switches for system-default TLS and strong cryptography in code, so the choice does not depend only on `NcTalkOutlookAddIn.dll.config` inside Outlook's AppDomain. Connection tests and login-flow diagnostics request a fresh connection through `NcHttpClient`, so a changed TLS mode is tested with a new handshake instead of an existing pooled connection.
+- `app.config` maps the versions of the bundled HtmlSanitizer dependencies. The runtime resolver handles only matching requests from the add-in and this dependency stack in the add-in directory; higher versions, different tokens or cultures, and unrelated requesters remain untouched. `tools/ci/Check-VendorAssemblyBindings.ps1` loads every transitive vendor reference in a fresh .NET Framework AppDomain with these redirects.
 
 ### End-to-end flows
 
@@ -214,6 +219,7 @@ Runtime rules:
 1. User clicks **Insert Talk link** in an appointment.
 2. `UI/TalkLinkForm.cs` collects: title, password, lobby, listable flag, room type, participant sync options, optional delegation target.
 3. `Controllers/TalkRibbonController.cs` prefetches backend policy status and password policy in parallel (`Task.WhenAll`) before opening the wizard.
+   - A delegation target is rejected as self when it matches the canonical UID, configured login, or known primary email. Directory selections remain keyed by canonical UID.
 4. `Services/TalkService.cs` creates the room via OCS.
 5. `Controllers/TalkAppointmentController.ApplyRoomToAppointment(...)` (invoked by `NextcloudTalkAddIn`) updates the appointment:
    - `Location` (Talk URL)
@@ -223,10 +229,13 @@ Runtime rules:
    - talk appointment HTML is passed through an explicit compatibility transform (`HtmlTemplateSanitizer.PrepareTalkAppointmentHtmlForOutlookRtfBridge(...)`) before insert
    - appointment HTML insert uses the HTML->RTF bridge (`MailItem.HTMLBody` -> `AppointmentItem.RTFBody`), not `AppointmentItem.HTMLBody` and not `HTMLEditor.body.innerHTML`
 6. A runtime subscription is registered for the appointment (`AppointmentSubscription` in `NextcloudTalkAddIn.AppointmentSubscription.cs`):
-   - **Write** (save): updates lobby timer on time changes, updates room description, syncs participants, applies delegation
-   - If Outlook exposes the final changed start time only shortly after `Write`, a short deferred post-write verification retries the lobby update with the newly observed start time on the same opened appointment instead of broad calendar scanning.
-   - **Close** (discard without saving): deletes the room to avoid orphans (best-effort)
-   - **BeforeDelete**: queues room deletion in the background only when saved-event deletion is opted in (`TalkDeleteRoomOnEventDelete` or locked backend `talk_delete_room_on_event_delete`) and the appointment has `X-NCTALK-TOKEN`; URL/location parsing is not a deletion source
+   - **Write** captures the required Outlook values on the STA thread. `TalkAppointmentSyncCoordinator` coalesces the immutable snapshots and performs lobby, description, participant, and delegation requests in the background.
+   - If Outlook exposes the final changed start time only shortly after `Write`, a short deferred post-write capture reads that same opened appointment instead of scanning calendars.
+   - **Close** of a newly created, unsaved appointment queues orphan-room cleanup.
+   - **BeforeDelete** uses Outlook's appointment-specific deletion event. Organizer, token, delegation, and recurrence checks run on that appointment before `QueueSavedTalkRoomDeletion(...)` creates a deletion job with `PolicyRequired=true`; URL/location parsing is not a deletion source. The background worker resolves the effective `TalkDeleteRoomOnEventDelete` policy before deleting the room. The same event path covers deletion from an open appointment and from the calendar view.
+   - `Explorer.SelectionChange` rebinds only selected Talk appointments. The current selection is processed once when each Explorer is hooked, so calendar-view deletion also works immediately after an Outlook restart without opening the appointment.
+7. Startup initializes only the persistent deletion retry worker and hooks existing Explorer surfaces. It does not enumerate Outlook stores or calendar folders, scan calendar items, or retain folder-level `Items` subscriptions.
+8. The DPAPI-protected deletion queue uses a primary file and backup. Nextcloud deletion runs in the background, and queued failures are retried after delay and after an Outlook restart. Cleanup of a newly created room from an unsaved, discarded appointment uses the same queue with `PolicyRequired=false`. When older state is loaded, only records already marked for deletion survive; tracking-only records are discarded.
 
 #### Talk appointment-safe HTML subset (backend custom templates)
 
@@ -248,24 +257,26 @@ For stable rendering in Outlook appointment bodies (Word/RTF pipeline), backend 
 1. User clicks **Insert Nextcloud share** while composing an email.
 2. `UI/FileLinkWizardForm.cs` collects sharing settings and the file/folder selection.
 3. `Controllers/FileLinkLaunchController.cs` loads the required capability snapshot, backend policy status, and password policy in parallel (`Task.WhenAll`) before opening the wizard.
+   - The wizard starts with the persisted FileLink defaults. A locked share-policy value overrides its local counterpart; an editable value leaves the saved Outlook setting unchanged.
 4. `Services/FileLinkService.cs` orchestrates the upload and public-share flow through the dedicated planner, DAV, transfer, share, and progress components.
    - `FileLinkSelectionScanner` scans the local selection once. The root-relative scan result preserves empty directories, rejects symbolic links and junctions, and captures file size and modification time. `FileLinkUploadPlanner` then assigns transfer modes without touching the server.
-   - When the user leaves the first manual wizard step, a depth-zero DAV `PROPFIND` checks the target derived from the base path, the wizard's fixed date, and the sanitized share name. An occupied target keeps the wizard on that step. `FileLinkDavClient` still reserves the share root later with one atomic `MKCOL`, so a collision created after the preflight stops the upload safely. Attachment automation skips the preflight and continues to try numbered names. Empty directories, parents needed by bulk or chunked transfers, and Direct parents shared by multiple files are created once, parent first, with at most three parallel requests per level. Single-file Direct path chains are created by `X-NC-WebDAV-Auto-Mkcol`.
+   - When the user leaves the first manual wizard step, a depth-zero DAV `PROPFIND` checks the target derived from the base path, the wizard's fixed date, and the sanitized share name. An occupied target keeps the wizard on that step. `FileLinkDavClient` still reserves the share root later with an atomic `MKCOL`, so a collision created after the preflight stops the upload safely. A `405` after an indeterminate first result counts as a successful reservation only when a depth-zero DAV `PROPFIND` confirms the exact path as a collection. A known `405` without an earlier indeterminate result remains a collision. Attachment automation skips the preflight and continues to try numbered names. Empty directories, parents needed by bulk or chunked transfers, and Direct parents shared by multiple files are created once, parent first, with at most three parallel requests per level. Single-file Direct path chains are created by `X-NC-WebDAV-Auto-Mkcol`.
    - `FileLinkTransferService` coordinates dedicated bulk, direct, and chunked uploaders. Non-bulk files up to 20 MiB use direct WebDAV `PUT` and the server-side `X-NC-WebDAV-Auto-Mkcol: 1` header. Larger files use Nextcloud chunked upload v2 under `/remote.php/dav/uploads/<user>/<upload-id>` and are assembled with `MOVE .file`. Direct and chunked files share the limit of three concurrent transfers.
-   - When the typed capability snapshot exposes `dav.bulkupload = "1.0"`, at least 20 candidate files of at most 8 MiB can be packed into sequential multipart batches of at most 100 files and about 20 MiB. The planner selects bulk only when the batch plan saves at least 20 percent of all upload requests, counting base-path and share-root creation, planned directories, direct files, and every chunk-folder, chunk-`PUT`, and final `MOVE`.
+   - When the typed capability snapshot exposes `dav.bulkupload = "1.0"`, at least 20 candidate files of at most 8 MiB can be packed into sequential multipart batches of at most 100 files and about 20 MiB. The planner selects bulk only when the batch plan saves at least 20 percent of all upload requests, counting base-path and share-root creation, planned directories, direct files, and every chunk-folder, chunk-`PUT`, and final `MOVE`. Before the first server change, sequential MD5 preparation reports its completed and total file count as a separate wizard phase.
    - After all transfers finish, `FileLinkShareClient` sends one OCS create-share `POST` with path, explicit permissions, password, expiration date, label, and note. It omits the legacy `publicUpload` parameter because Nextcloud would use it to replace the explicit permission mask. No metadata update request follows.
    - A missing response, a transient gateway/service response without an OCS result, or a successful response without usable share data makes the create result ambiguous. `FileLinkShareClient` records that path and performs an exact-path OCS lookup with child shares disabled before another create request. It reuses a matching public-link share, retries only after a confirmed empty result, and keeps blocking duplicate creation while the lookup result remains unknown.
    - Replay-safe `MKCOL`, direct `PUT`, chunk `PUT`, and bulk `POST` operations receive at most two retries for transport failures and selected transient HTTP responses. Each bulk retry rebuilds the same request body from the unchanged local plan. A final chunk `MOVE` is never sent twice blindly: after an indeterminate transport result, an exact depth-zero DAV probe accepts the transfer only when the target is a non-collection resource with the expected length.
-   - `FileLinkUploadProgress` limits phase updates to at most ten per second. Debug logs contain plan, retry, five-second aggregate progress, and completion records instead of per-file success noise.
+   - The wizard shows scan, checksum, folder-preparation, and aggregate transfer progress. Intermediate checksum and transfer updates are limited to at most ten per second. Debug logs contain plan, retry, five-second aggregate progress, and completion records instead of per-file success noise.
 5. `Utilities/FileLinkHtmlBuilder.cs` generates the HTML block (header + link + password + permissions + expiration date).
    - backend-provided custom share templates are sanitized via `HtmlTemplateSanitizer` and fail closed on sanitizer errors.
+   - Before placeholder replacement, custom templates remove the nearest block wrapper for optional values that are empty. Fixed labels such as `Password` therefore do not remain without a value in HTML or plain-text output.
    - `Models/AttachmentLinkTargetPolicy.cs` resolves `policy.share.attachment_link_target` (`zip_download` / `share_page`) against the nullable local setting. An invalid stored local value is treated as unset, so a valid editable backend value can seed it. ZIP is used when no valid local or usable backend value exists; a locked backend value wins.
    - `AttachmentMode` controls read-only permissions, rights-row suppression, and cleanup. The explicit attachment link target controls only the URL plus `{LINK_INTRO}` and `{LINK_LABEL}`. Manual shares always render the Nextcloud share page. Legacy templates without these placeholders keep their existing output.
    - ZIP URL derivation is fail-closed: the public absolute HTTP(S) URL must end in `/s/<token>` and match the OCS token. Invalid input throws before insertion; there is no original-URL fallback.
    - custom Share rendering prefers `policy.share.share_html_block_template_v2` and falls back to `policy.share.share_html_block_template`. This supports older backend releases while allowing current backends to keep the original response key placeholder-free for older clients.
    - current backends expose `policy.share.share_html_block_effective_language` for custom templates. Outlook uses it for generated link wording, field labels, permission names, and password hints; older backends without the field keep the previous UI-language fallback.
    - plain-text compose keeps `MailItem.BodyFormat=olFormatPlain`; the share block is rendered as a framed text block with `#` separators and inserted through Outlook WordEditor. Inline replies/forwards keep two empty paragraphs above the block for the sender's own text. `MailItem.Body` is not rewritten.
-6. `NextcloudTalkAddIn.InsertHtmlIntoMail(...)` / `InsertPlainTextIntoMail(...)` insert the rendered block into the message body (delegated to `Controllers/MailInteropController.cs`). HTML compose uses WordEditor first so existing managed bookmarks stay intact; a direct `HTMLBody` write remains the compatibility fallback when the Inspector editor cannot be opened.
+6. `NextcloudTalkAddIn.TryInsertHtmlIntoMail(...)` / `TryInsertPlainTextIntoMail(...)` return the insertion result from `Controllers/MailInteropController.cs`. HTML compose uses WordEditor first so existing managed bookmarks stay intact; a direct `HTMLBody` write remains the compatibility fallback when the Inspector editor cannot be opened. If every insertion path fails, `FileLinkLaunchController` queues the newly created server artifacts for cleanup and reports the wizard as failed.
 
 Compose runtime parity additions in `NextcloudTalkAddIn.cs` (`MailComposeSubscription`) with lifecycle logic delegated to `Controllers/ComposeShareLifecycleController`:
 
@@ -278,6 +289,7 @@ Compose runtime parity additions in `NextcloudTalkAddIn.cs` (`MailComposeSubscri
 - Pre-add attachment interception:
   - `BeforeAttachmentAdd` path resolves candidate file metadata early
   - can best-effort cancel host attachment add and launch NC sharing before Outlook post-add handling.
+  - an enforcing always-via-NC policy cancels the host add when the candidate cannot be materialized or evaluated.
   - hard Outlook/Exchange size blocks can still happen before add-in callbacks and are not interceptable via official Outlook OOM events.
 - Runtime host guard checks (live large-attachment setting) at:
   - pre-evaluation
@@ -288,30 +300,47 @@ Compose runtime parity additions in `NextcloudTalkAddIn.cs` (`MailComposeSubscri
   - queues files as initial wizard selections
   - opens directly in file-step-equivalent mode.
   - copies the effective attachment link target into `FileLinkRequest`; no per-share target switch is exposed.
+- Outlook body resources with `PR_ATTACHMENT_HIDDEN=true`, such as signature images, are excluded from attachment batching, threshold totals, FileLink selection, host removal, and the required-routing send gate.
 - `UI/FileLinkWizardForm.cs` file-step queue accepts Explorer drag & drop for files/folders across queue and action-area controls.
-- Compose share cleanup lifecycle:
-  - arm immediately after share creation
-  - clear only after successful send
-  - delete server folder artifacts on unsent close (with send/close grace timer).
+- Compose insertion and separate-password lifecycle:
+  - `ComposeLifecycleOrigin` retains the exact server/account origin needed to delete the created share or issue a later Secrets request. Cleanup never falls back to the currently selected account.
+  - if a newly created share cannot be inserted into the message, the controller attempts to delete its server folder with that captured origin.
+  - after successful insertion, `MailComposeSubscription` tracks its `ComposeShareCleanupRecord` until Outlook raises `AfterWrite`. A completed write covers Save, AutoSave, and the write performed for Send/Outbox, so those paths release the cleanup record without deleting the share.
+  - classic compose windows bind the concrete `InspectorEvents_10.Close` event. It fires only when that Inspector actually closes; if no successful write followed the insertion, the subscription queues deletion using the captured account and relative path. A cancelled close therefore keeps the share state armed.
+  - inline compose keeps `Explorer.InlineResponseClose` as a surface-transition signal because Outlook also raises it for pop-out and navigation. `ItemEvents_10.Unload` remains the terminal item signal for an inline response and evaluates only previously captured cleanup state without reading the unloaded `MailItem`.
+  - DAV cleanup uses the shared bounded FileLink retry path. A repeated delete remains idempotent because an already absent folder is accepted.
+  - cleanup tracking is held in memory. Once Outlook has written the message, deleting that saved draft later or after an Outlook restart does not delete the share; the unused share must be removed manually.
+  - `RegisterSeparatePasswordDispatch` initially keeps the password follow-up data only in the subscription's `_passwordDispatchQueue`. Save and AutoSave do not serialize that queue into the primary mail. Closing the compose window disposes the subscription, so a reopened draft, an Outlook restart before the first send attempt, or a new message created from an `.oft` template cannot restore the follow-up state.
+  - `OnSend` is the direct dispatch boundary. The queue is consumed once, final Secrets/plain content is produced, the primary mail's resolved recipients and effective `SendUsingAccount`/`SentOnBehalfOfName` are applied, body and matching backend signature are finalized, recipients are resolved, and the follow-up is submitted without saving an intermediate Outlook draft.
+  - no Drafts, Outbox, Sent-folder, MIME-marker, or restart-recovery path participates in password delivery. Outlook delayed/offline delivery still invokes `OnSend`, so the password follow-up is submitted immediately and does not wait for the primary item to leave the Outbox. Unexpected follow-up failures never set the primary send's `cancel` flag.
+  - the send gate also cancels an enforcing attachment policy while an ordinary attachment still violates it.
 - Separate password-mail dispatch:
-  - queue password-only HTML after share creation
-  - capture recipients on send
-  - capture the sender account on send and apply it to the follow-up mail before signature/body dispatch
-  - when backend policy requests Nextcloud Secrets, split the final recipient list and create one one-time Secrets link per recipient
+  - queue password-only content after share creation and persist the origin settings needed by later Secrets requests
+  - capture the successful share-time signature policy/settings snapshot before the queue entry is accepted
+  - capture resolved recipients and sender identity on send
+  - deduplicate resolved SMTP addresses across To, Cc, and Bcc before Secrets creation
+  - when backend policy requests Nextcloud Secrets, create one one-time Secrets link per unique final recipient
   - Secrets links are encrypted locally with AES-GCM through Windows CNG; no new crypto dependency is bundled
   - if Secrets creation fails, fall back to the existing plain separate password mail and warn the user
-  - dispatch only after successful primary send and keep the source compose mode for HTML vs plain-text follow-up mails
-  - auto-send first, then manual fallback draft on failure.
+  - preserve the source compose mode for HTML vs plain-text follow-up mails and submit directly from the primary `Send` callback without calling `Save`
+  - on a definite automatic-send failure, open one fully prepared manual fallback; when Outlook's submission state is ambiguous, do not create or send a duplicate
+  - if strict sender or recipient preparation fails before submission, open a fresh manual fallback with normalized To/Cc/Bcc strings and reconcile the managed signature after the Inspector is initialized.
 
 #### IFB flow
 
 1. User enables IFB in Settings.
-2. `Services/FreeBusyServer.cs` starts a local HTTP listener on the configured IFB port (`Settings -> IFB -> Local IFB port`, default: `7777`).
-3. `Services/FreeBusyManager.cs` updates Outlook registry values so Outlook requests free/busy data via the local endpoint.
+2. `Services/FreeBusyManager.cs` creates a random request secret for each Outlook process. `Services/IfbRegistryStateStore.cs` keeps the DPAPI-protected ownership state with primary/backup recovery.
+3. `Services/FreeBusyServer.cs` starts a local HTTP listener on the configured IFB port (`Settings -> IFB -> Local IFB port`, default: `7777`), accepts only `/nc-ifb/<request-secret>/freebusy/<address>.vfb`, and caps concurrent proxy requests at four.
+4. `Services/IfbRegistryOwnershipManager.cs` records each original user value and registers `%NAME%@%SERVER%.vfb` below the secret endpoint. Outlook replaces both placeholders with the attendee's full SMTP address. Policy values are read for conflicts but are not written.
+5. During upgrade, an unowned legacy `/nc-ifb/freebusy/...` value is adopted only in its pre-token form. An unowned tokenized path remains blocked. Without a saved external predecessor, disabling IFB removes the stale legacy value rather than restoring it.
+6. On disable, an original value is restored only if the current value still equals the value written by NC Connector.
+7. `IfbAddressBookCache` scopes cached identities by Outlook profile, normalized Nextcloud base URL including subpath, and canonical Nextcloud UID.
 
 ## Network endpoints
 
 The add-in uses Nextcloud **OCS** and **WebDAV** endpoints.
+
+`NextcloudUriValidator` normalizes the configured base URL before authenticated service construction. Runtime configuration rejects explicit HTTP, user information, query strings, and fragments. Absolute login-flow and password-policy endpoints returned by Nextcloud must use HTTPS and match the configured scheme, host, and port.
 
 Authentication aliases and DAV identities are intentionally kept separate. Basic Auth uses the login entered by the user (which may be an email address), while `Services/NextcloudUserIdentityService.cs` resolves the canonical UID from `GET /ocs/v2.php/cloud/user?format=json`. User-scoped FileLink, CardDAV, and CalDAV paths use only `ocs.data.id`; a missing UID is treated as an error rather than silently substituting the login.
 
@@ -345,14 +374,18 @@ Secrets (optional separate password mode):
 
 IFB (DAV via proxy):
 
-- Local listener: `http://127.0.0.1:<ifb-port>/nc-ifb/...` (default `<ifb-port>=7777`)
+- Reserved listener namespace: `http://127.0.0.1:<ifb-port>/nc-ifb/` (default `<ifb-port>=7777`)
+- Accepted Outlook path: `/nc-ifb/<request-secret>/freebusy/<address>.vfb`; the secret is generated for each Outlook process and is not persisted. DPAPI-protected profile state stores registry ownership only
+- Requests without the request secret return `404`
 - The proxy talks to CalDAV and Addressbook endpoints under `remote.php/dav/...`
 
 Update check:
 
 - Homepage endpoint: `GET https://nc-connector.de/wp-json/ncc/v1/update-check`
 - Query values: `product=outlook`, installed version, channel, and a daily rotating client hash.
-- Downloads still point directly to GitHub release assets. The homepage only returns release metadata and counts one anonymous client per day.
+- Release and download targets from the response are retained only when they use HTTPS below `github.com/nc-connector/NC_Connector_for_Outlook/releases/`. Other values are discarded.
+- `UpdateAvailable` is calculated locally from the installed and reported versions.
+- The homepage only returns release metadata and counts one anonymous client per day.
 
 ## Localization (i18n)
 
@@ -378,7 +411,8 @@ Debug logging is optional and is intended to make support cases reproducible.
 - Daily log file format: `%LOCALAPPDATA%\\NC4OL\\addin-runtime.log_YYYYMMDD`
 - Runtime exceptions are always written via `DiagnosticsLogger.LogException(...)`, even when debug logging is disabled.
 - Retention: keep latest 7 daily log files and delete files older than 30 days (best effort cleanup).
-- Anonymization redacts configured NC URL/base host, token/password-like values, authorization credentials, user identifiers, email addresses, and local user path fragments before log write.
+- Authorization values, URL credentials, structured token/password fields, Talk/share path tokens, and Secret fragments are redacted before every log write, even when optional anonymization is off.
+- Anonymization additionally redacts the configured NC URL/base host, user identifiers, email addresses, and local user path fragments.
 
 Format:
 
@@ -483,10 +517,12 @@ Suggested smoke test sequence:
 2. Calendar: create a new appointment, insert a Talk link, save the appointment, then change start time and save again (lobby update).
 3. Calendar: restart Outlook, open the same appointment, change start time and save again (persistent metadata + lobby update).
 4. Calendar: add attendees, save again (participant sync).
-5. Mail: run the sharing wizard, upload 1–2 small files, insert the HTML block, and send to yourself.
-6. IFB: enable IFB, then verify the local endpoint responds:
-   - `Invoke-WebRequest http://127.0.0.1:<ifb-port>/nc-ifb/ -UseBasicParsing`
-7. Settings -> Advanced: click `Check now` and verify that latest version, last check, download link, and changelog summary update without blocking Outlook.
+5. Calendar: enable saved-event room deletion, then delete saved Talk appointments from an open appointment and from the calendar view. Verify that each associated room is removed. Repeat once with a temporary Nextcloud failure, restart Outlook, and verify the queued retry.
+6. Mail: run the sharing wizard, upload 1–2 small files, insert the HTML block, and send to yourself.
+7. Mail: insert a share and discard the message before it is saved; verify that the exact server folder is removed. Repeat with Save or AutoSave and verify that the share remains.
+8. Mail: with separate password delivery, create the share and click Send from the same compose window. Verify that the final follow-up leaves through the same effective Outlook account immediately and that no NC Connector password draft remains. Repeat with delayed/offline delivery and verify the documented direct boundary: the follow-up does not wait for the primary Outbox item. A closed and reopened primary draft or an `.oft` template with an existing share block is outside the supported flow and requires a new share before sending.
+9. IFB: enable IFB, verify the URL reservation and TCP listener, then use Outlook's Scheduling Assistant with an address whose domain differs from the configured Nextcloud login and host. A direct request without the request secret is expected to return `404`.
+10. Settings -> Advanced: click `Check now` and verify that latest version, last check, download link, and changelog summary update without blocking Outlook.
 
 ## X-NCTALK-* property reference
 

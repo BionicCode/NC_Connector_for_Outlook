@@ -38,9 +38,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check code-used locale keys
+      - name: Check locale key usage
         shell: pwsh
         run: .\tools\ci\Check-LocaleUsage.ps1
+
+  documentation-links:
+    name: Documentation links
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check language-specific guide links
+        shell: pwsh
+        run: .\tools\ci\Check-DocumentationLinks.ps1
 
   vendor-package:
     name: Vendor/package consistency
@@ -53,6 +65,10 @@ jobs:
       - name: Check vendored dependencies and installer inputs
         shell: pwsh
         run: .\tools\ci\Check-VendorPackage.ps1
+
+      - name: Resolve vendored assembly references
+        shell: pwsh
+        run: .\tools\ci\Check-VendorAssemblyBindings.ps1
 
   code-hygiene:
     name: Code hygiene
@@ -149,6 +165,42 @@ jobs:
       - name: Run template sanitizer tests
         shell: pwsh
         run: .\tools\ci\Invoke-OutlookTemplateSanitizerTests.ps1
+
+  security-regressions:
+    name: Security regressions
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run settings, URL, update, and logging security tests
+        shell: pwsh
+        run: .\tools\ci\Invoke-OutlookSecurityRegressionTests.ps1
+
+  compose-lifecycle:
+    name: Compose lifecycle
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run compose lifecycle regression tests
+        shell: pwsh
+        run: .\tools\ci\Invoke-OutlookComposeLifecycleTests.ps1
+
+  talk-ifb-lifecycle:
+    name: Talk and IFB lifecycle
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Talk and IFB lifecycle regression tests
+        shell: pwsh
+        run: .\tools\ci\Invoke-OutlookTalkIfbLifecycleTests.ps1
 
   filelink-rendering:
     name: FileLink rendering

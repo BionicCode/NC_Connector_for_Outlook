@@ -5,10 +5,20 @@ Param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path $ProjectRoot).Path
 $SettingsStoragePath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Settings\SettingsStorage.cs"
+$SettingsTransactionPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Settings\SettingsFileTransaction.cs"
+$SettingsWorkflowPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Controllers\SettingsWorkflowController.cs"
+$SettingsFormPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\UI\SettingsForm.cs"
 $AddinSettingsPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Settings\AddinSettings.cs"
+$FileLinkWizardPolicyPath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\UI\FileLinkWizardForm.Policy.cs"
+$AddinLifecyclePath = Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\NextcloudTalkAddIn.Lifecycle.cs"
 
 $storage = Get-Content -Raw -Path $SettingsStoragePath
+$transaction = Get-Content -Raw -Path $SettingsTransactionPath
+$workflow = Get-Content -Raw -Path $SettingsWorkflowPath
+$settingsForm = Get-Content -Raw -Path $SettingsFormPath
 $settings = Get-Content -Raw -Path $AddinSettingsPath
+$fileLinkWizardPolicy = Get-Content -Raw -Path $FileLinkWizardPolicyPath
+$addinLifecycle = Get-Content -Raw -Path $AddinLifecyclePath
 $failures = New-Object System.Collections.Generic.List[string]
 
 $savedKeys = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
@@ -68,8 +78,106 @@ if (-not ($storage -match 'ProtectedData\.Protect') -or -not ($storage -match 'P
     $failures.Add("SettingsStorage must protect and unprotect AppPassword via DPAPI.")
 }
 
+if (-not ($storage -match 'catch\s*\(FormatException') -or -not ($storage -match 'catch\s*\(CryptographicException')) {
+    $failures.Add("A malformed or undecryptable DPAPI app password must not abort loading all other settings.")
+}
+
+if (-not ($storage -match 'SaveUserInitiated') -or -not ($storage -match '_automaticSaveBlocked')) {
+    $failures.Add("SettingsStorage must distinguish explicit saves from blocked automatic saves after recovery failures.")
+}
+
+if (-not ($storage -match 'TryRestorePrimaryFromBackup') -or -not ($storage -match '\.Commit\(')) {
+    $failures.Add("SettingsStorage must use backup recovery and atomic commits.")
+}
+
+if (-not ($transaction -match 'new Mutex') -or -not ($transaction -match 'FileOptions\.WriteThrough') -or -not ($transaction -match 'Flush\(true\)')) {
+    $failures.Add("Settings file commits must be profile-locked and flushed durably.")
+}
+
+if (-not ($transaction -match 'File\.Replace') -or -not ($transaction -match '\.bak')) {
+    $failures.Add("Settings file commits must atomically replace the primary and retain a backup.")
+}
+
+$persistNextIndex = $workflow.IndexOf("_persistSettings(nextSettings);", [StringComparison]::Ordinal)
+$applyRuntimeNextIndex = $workflow.IndexOf("ApplyRuntimeSettings(nextSettings);", [StringComparison]::Ordinal)
+if ($persistNextIndex -lt 0 -or $applyRuntimeNextIndex -le $persistNextIndex) {
+    $failures.Add("Settings must be persisted before durable runtime settings are applied.")
+}
+
+if (-not ($workflow -match 'catch\s*\(Exception ex\)[\s\S]{0,600}?Strings\.SettingsSaveFailed[\s\S]{0,300}?MessageBoxIcon\.Error')) {
+    $failures.Add("Settings persistence failures must be reported visibly inside the settings workflow.")
+}
+
+$validationStart = $workflow.IndexOf("private bool ValidateTransportSecurityBeforeSave", [StringComparison]::Ordinal)
+$runtimeApplyStart = $workflow.IndexOf("private void ApplyRuntimeSettings", [StringComparison]::Ordinal)
+if ($validationStart -lt 0 -or $runtimeApplyStart -le $validationStart) {
+    $failures.Add("Transport-security validation method could not be inspected.")
+}
+else {
+    $validationMethod = $workflow.Substring($validationStart, $runtimeApplyStart - $validationStart)
+    if ($validationMethod -match '_setCurrentSettings') {
+        $failures.Add("Pre-save transport validation must not temporarily replace the shared runtime settings.")
+    }
+    if (-not ($validationMethod -match '_applyTransportSecurityFromSettings\s*\(\s*nextSettings\s*,')) {
+        $failures.Add("Pre-save transport validation must evaluate the candidate settings directly.")
+    }
+}
+
+if (-not ($addinLifecycle -match 'TryApplyTransportSecurityFromSettings\(\s*"startup"\s*,\s*false\s*\)')) {
+    $failures.Add("Add-in startup must apply the persisted transport-security settings.")
+}
+
+if (-not ($workflow -match '_applyTransportSecurityFromSettings\(\s*nextSettings\s*,\s*"settings_save_commit"')) {
+    $failures.Add("A successful settings save must apply the persisted transport-security settings.")
+}
+
 if (-not ($storage -match 'case\s+"SharingAttachmentLinkTarget"[\s\S]{0,500}?AttachmentLinkTargetPolicy\.TryParse[\s\S]{0,500}?\(AttachmentLinkTarget\?\)null')) {
     $failures.Add("An invalid SharingAttachmentLinkTarget value must load as an unset nullable value.")
+}
+
+$refreshStart = $settingsForm.IndexOf("private async Task<bool> RefreshSettingsServerStateAsync", [StringComparison]::Ordinal)
+$applyPolicyStart = $settingsForm.IndexOf("private void ApplyBackendPolicyStatus", [StringComparison]::Ordinal)
+if ($refreshStart -lt 0 -or $applyPolicyStart -le $refreshStart) {
+    $failures.Add("Settings server-state refresh method could not be inspected.")
+}
+else {
+    $refreshMethod = $settingsForm.Substring($refreshStart, $applyPolicyStart - $refreshStart)
+    if ($refreshMethod -match '!policyStatus\.FetchSucceeded\)\s*\{[\s\S]{0,500}?return false;') {
+        $failures.Add("An unavailable optional backend policy endpoint must not block local settings saves.")
+    }
+    if (-not ($refreshMethod -match 'Settings server state refresh failed\.[\s\S]{0,500}?return true;')) {
+        $failures.Add("A settings server-state refresh exception must leave local settings save available.")
+    }
+}
+
+$wizardDefaultsStart = $fileLinkWizardPolicy.IndexOf("private void ApplyPolicyDefaultsToSettings", [StringComparison]::Ordinal)
+$wizardWarningStart = $fileLinkWizardPolicy.IndexOf("private void ApplyPolicyWarningUi", [StringComparison]::Ordinal)
+if ($wizardDefaultsStart -lt 0 -or $wizardWarningStart -le $wizardDefaultsStart) {
+    $failures.Add("FileLink wizard policy-default method could not be inspected.")
+}
+else {
+    $wizardDefaultsMethod = $fileLinkWizardPolicy.Substring(
+        $wizardDefaultsStart,
+        $wizardWarningStart - $wizardDefaultsStart)
+    $wizardDefaultBindings = @(
+        @{ Key = "share_base_directory"; Assignment = "_request\.BasePath\s*=" },
+        @{ Key = "share_name_template"; Assignment = "_defaults\.SharingDefaultShareName\s*=" },
+        @{ Key = "share_permission_upload"; Assignment = "_defaults\.SharingDefaultPermCreate\s*=" },
+        @{ Key = "share_permission_edit"; Assignment = "_defaults\.SharingDefaultPermWrite\s*=" },
+        @{ Key = "share_permission_delete"; Assignment = "_defaults\.SharingDefaultPermDelete\s*=" },
+        @{ Key = "share_set_password"; Assignment = "_defaults\.SharingDefaultPasswordEnabled\s*=" },
+        @{ Key = "share_send_password_separately"; Assignment = "_defaults\.SharingDefaultPasswordSeparateEnabled\s*=\s*policyBool" },
+        @{ Key = "share_expire_days"; Assignment = "_defaults\.SharingDefaultExpireDays\s*=" }
+    )
+    foreach ($binding in $wizardDefaultBindings) {
+        $escapedKey = [regex]::Escape($binding.Key)
+        $lockedAssignmentPattern =
+            'if\s*\(\s*IsPolicyLocked\("' + $escapedKey + '"\)[\s\S]{0,350}?' + $binding.Assignment
+        if (-not ($wizardDefaultsMethod -match $lockedAssignmentPattern)) {
+            $failures.Add(
+                "FileLink wizard must preserve a saved local '$($binding.Key)' default when the backend value is editable, while applying a locked backend value.")
+        }
+    }
 }
 
 if ($failures.Count -gt 0) {

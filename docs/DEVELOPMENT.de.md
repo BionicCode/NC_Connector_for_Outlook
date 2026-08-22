@@ -1,4 +1,4 @@
-# DEVELOPMENT.de.md — NC Connector for Outlook
+# Entwicklungsleitfaden — NC Connector für Outlook
 
 Dieses Dokument richtet sich an Entwickler und beschreibt Aufbau, Build und Release-Prozess des **NC Connector for Outlook** (Outlook classic COM Add-in).
 
@@ -6,44 +6,40 @@ Rollout, Konfiguration, Betriebsprüfungen und Störungs-Runbooks für Administr
 
 ## Inhalt
 
-- [Projekt-Überblick](#projekt-überblick)
-- [Voraussetzungen](#voraussetzungen)
-- [Build (MSI)](#build-msi)
-- [Lokales Testen](#lokales-testen)
+- [Projektzweck](#projektzweck)
+- [Schnellstart](#schnellstart)
+- [Repository-Struktur](#repository-struktur)
+- [Architektur](#architektur)
+- [Netzwerk-Endpunkte](#netzwerk-endpunkte)
+- [Lokalisierung (i18n)](#lokalisierung-i18n)
 - [Logging](#logging)
-- [Code-Struktur](#code-struktur)
-- [Versionierung & Release](#versionierung--release)
+- [Kompatibilität und Versionsprüfungen](#kompatibilität-und-versionsprüfungen)
+- [Build und Release](#build-und-release)
+- [Lokales Testen](#lokales-testen)
+- [Referenz der X-NCTALK-*-Eigenschaften](#referenz-der-x-nctalk--eigenschaften)
+- [Erweiterungspunkte](#erweiterungspunkte)
 
-## Projekt-Überblick
+## Projektzweck
 
 Das Add-in integriert:
 
 - **Nextcloud Talk** direkt aus dem Termin (Raum erstellen, Lobby, Moderator-Delegation, Teilnehmer-Automation)
-- **Nextcloud Filelink** im E-Mail-Composer (Wizard, Upload, HTML-Block)
+- **Nextcloud-Freigaben** im E-Mail-Composer (Upload, Linkfreigabe und Einfügen des HTML- oder Textblocks)
 - **Zentrale Backend-E-Mail-Signaturen** fuer passende Outlook-Absenderkonten
 - **IFB (Internet Free/Busy)** als lokaler HTTP-Proxy zu Nextcloud
 
-## Release 3.1.0 Delta-Ueberblick
+## Schnellstart
 
-Diese Release-Linie erweitert Compose-Unterstuetzung und zentrale Backend-Signaturen:
+### Voraussetzungen
 
-- Backend-gesteuerte E-Mail-Signaturen gelten fuer passende Outlook-Absenderidentitaeten in HTML/RTF und Plain Text, auch bei Antworten und Weiterleitungen.
-- Nextcloud-Freigaben koennen aus Inline-Antworten/-Weiterleitungen eingefuegt werden und laufen ueber WordEditor, damit zitierte Inhalte erhalten bleiben.
-- Plain-Text-Freigabebloecke werden eingefuegt, ohne `MailItem.Body` direkt umzuschreiben.
-- Grosse Dateien nutzen Nextcloud Chunked WebDAV Upload v2; der Freigabe-Wizard zeigt Uploadgeschwindigkeit pro Datei.
-- Separate Passwort-Follow-up-Mails behalten die Absenderidentitaet des Original-Compose, bekommen bei Policy-/Absender-Match die Backend-Signatur und oeffnen bei Auto-Send-Fehler weiterhin einen manuellen Fallback-Entwurf.
-- Talk-Raumloeschung fuer gespeicherte Termine bleibt Opt-in; Talk-Cleanup-Metadaten bleiben lokal in Outlook.
-
-## Voraussetzungen
-
-- Windows 10/11
-- Outlook classic (typischerweise x64)
+- Windows 10 oder Windows 11 (64-Bit)
+- Outlook classic (x64 oder x86)
 - **.NET Framework 4.7.2** (Target)
 - MSBuild (z.B. Visual Studio Build Tools)
 - **.NET SDK** (für den WiX-v6-Build via `dotnet`)
 - **Nextcloud 32 oder neuer** (Laufzeit-Server)
 
-### Reference Assemblies (FrameworkPathOverride)
+**Referenz-Assemblies (`FrameworkPathOverride`)**
 
 Auf manchen Build-Systemen fehlen die .NET Framework Reference Assemblies für 4.7.2 (insbesondere CI/Minimal-Installationen). In dem Fall kann man die NuGet-ReferenceAssemblies nutzen und `FrameworkPathOverride` setzen.
 
@@ -58,7 +54,7 @@ nuget install Microsoft.NETFramework.ReferenceAssemblies.net472 -OutputDirectory
 $env:FrameworkPathOverride = "$PWD\packages\Microsoft.NETFramework.ReferenceAssemblies.net472\build\.NETFramework\v4.7.2"
 ```
 
-## Build (MSI)
+### MSI bauen (empfohlen)
 
 Der empfohlene Build läuft immer über `build.ps1`:
 
@@ -78,50 +74,29 @@ Output:
 
 - `dist\NCConnectorForOutlook-<version>.msi`
 
-Was das Script macht:
+### Lokal installieren und starten
 
-1) Build des COM Add-ins (`NcTalkOutlookAddIn.sln`) via MSBuild
-2) Ermittelt die Assembly-Version aus `NcTalkOutlookAddIn.dll`
-3) Build des WiX-v6-Installers (`installer/NcConnectorOutlookInstaller.wixproj`)
-4) Kopiert das MSI in `dist/`
-
-## Lokales Testen
-
-Die automatisierten Prüfungen unter `tools/ci/` laufen über die Jobs in
-`.github/workflows/outlook-build-checks.yml`. Anschließend decken die folgenden Smoke-Tests das Outlook-COM-Verhalten ab:
-
-1) MSI installieren (als Admin):
+1. MSI mit Administratorrechten installieren:
    - `msiexec /i dist\NCConnectorForOutlook-<version>.msi`
-2) Outlook starten
-3) Kalendertermin öffnen:
-   - Ribbon: **NC Connector → Talk-Link einfügen**
-4) E-Mail erstellen:
-   - Ribbon: **NC Connector → Nextcloud Freigabe hinzufügen**
-   - Inline-Antwort/-Weiterleitung: **Nachricht → NC Connector → Nextcloud Freigabe hinzufügen**
-5) Optional: IFB in Settings aktivieren, Port pruefen (`Einstellungen -> IFB`, Standard `7777`) und Endpunkt testen
-   - `Invoke-WebRequest http://127.0.0.1:<ifb-port>/nc-ifb/ -UseBasicParsing`
-6) Einstellungen -> Erweitert: `Jetzt prüfen` ausführen und kontrollieren, dass aktuelle Version, letzte Prüfung, Download-Link und Änderungsübersicht angezeigt werden.
+2. Outlook starten.
+3. Die Funktionen über das Ribbon öffnen:
+   - Termin: **NC Connector → Talk-Link einfügen**
+   - E-Mail: **NC Connector → Nextcloud Freigabe hinzufügen**
+   - Inline-Antwort oder -Weiterleitung: **Nachricht → NC Connector → Nextcloud Freigabe hinzufügen**
+4. Unter **NC Connector → Einstellungen** die Server-URL und Zugangsdaten konfigurieren.
 
-## Logging
+## Repository-Struktur
 
-- Aktivierung: Settings → Tab **Debug**
-- Option (Standard aktiv): `Logs anonymisieren`
-- Datei (taeglich): `%LOCALAPPDATA%\NC4OL\addin-runtime.log_YYYYMMDD`
-- Runtime-Exceptions werden ueber `DiagnosticsLogger.LogException(...)` immer geschrieben, auch wenn Debug deaktiviert ist.
-- Aufbewahrung: letzte 7 Tageslogs behalten, Logs aelter als 30 Tage (best effort) entfernen.
-- Bei aktiver Anonymisierung werden NC-URL/Basis-Host, Token/Secrets, Authorization-Werte, E-Mails, Benutzerkennungen und lokale User-Pfadsegmente maskiert.
+- `src/` — COM-Add-in mit WinForms-Oberfläche und Services
+- `installer/` — WiX-v6-MSI-Projekt
+- `docs/` — Betriebs- und Entwicklungsdokumentation
+- `VENDOR.md` — Hinweise und Lizenzen für gebündelte Drittanbieterkomponenten
+- `assets/` — Branding-Ressourcen
+- `dist/` — erzeugte MSI-Dateien
 
-Kategorien (Beispiele):
+## Architektur
 
-- `CORE` (Start, Settings, Registry)
-- `API` (HTTP Calls / Statuscodes)
-- `TALK` (Room Lifecycle, Lobby, Delegation)
-- `FILELINK` (Upload/Share)
-- `IFB` (Requests, Cache, Outlook Registry)
-
-FileLink-Uploadpfade protokollieren Uploadplan, Wiederholungen, periodischen Gesamtfortschritt und Abschlusszusammenfassung, aber nicht jeden erfolgreichen Datei-Request.
-
-## Code-Struktur
+### Zentrale Bausteine
 
 Root:
 
@@ -131,6 +106,8 @@ Root:
   Add-in-Bootstrap/Teardown (`OnConnection`, Shutdown/Disconnect).
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.Hooks.cs`
   Dedizierte Outlook-Event Hook-/Unhook-Helper.
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.CalendarSelection.cs`
+  Rebind ausgewählter Termine für das Löschen aus der Kalenderansicht ohne Kalenderscan.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.Logging.cs`
   Kategorienspezifische Runtime-Logging-Helper.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.PolicyTemplates.cs`  
@@ -143,10 +120,18 @@ Root:
   Compose-Attachment-Interception/Evaluation/Share-Launch-Flow.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Signature.cs`
   Backend-E-Mail-Signatur-Policy fuer das passende Outlook-Absenderkonto.
-- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.SendCleanup.cs`
-  Send/Close-Cleanup-Lifecycle inkl. separatem Passwort-Dispatch.
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.Send.cs`
+  Send-Gate und dauerhaftes Vorbereiten separater Passwortmails.
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.MailComposeSubscription.ShareCleanup.cs`
+  `AfterWrite`-, `Inspector.Close`- und Inline-`Unload`-Behandlung für neu eingefügte Freigaben.
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.ComposeLifecycle.cs`
+  Composition-Root-Brücke für asynchron angestoßene Freigabebereinigung und bestätigten Passwortversand.
 - `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.AppointmentSubscription.cs`
   Runtime-Subscription fuer Termin-Write/Close/Delete und Lifecycle-Cleanup.
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkAppointmentSync.cs`
+  STA-Erfassung und Hintergrundverarbeitung von Terminänderungen.
+- `src/NcTalkOutlookAddIn/NextcloudTalkAddIn.TalkRoomLifecycle.cs`
+  Start, Retry-Wiederherstellung und Teardown für vorgemerkte Talk-Raum-Löschungen.
 - `src/NcTalkOutlookAddIn/Controllers/SettingsWorkflowController.cs`
   Orchestrierung fuer Settings-Open/Save/Revert.
 - `src/NcTalkOutlookAddIn/Controllers/FileLinkLaunchController.cs`
@@ -158,14 +143,16 @@ Root:
 
 Controller:
 
-- `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` (Talk-Termin-Lifecycle: Room-Metadaten, Lobby-/Description-/Delegation-/Teilnehmer-Sync)
-- `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` (Compose-Share-Cleanup und separater Passwort-Versand inkl. Fallback)
+- `src/NcTalkOutlookAddIn/Controllers/TalkAppointmentController.cs` mit `Sync`-Partial (Terminmetadaten, lokaler Snapshot und entfernte Raumaktualisierung)
+- `src/NcTalkOutlookAddIn/Controllers/ComposeShareCleanupTracker.cs` (In-Memory-Status neu eingefügter, noch nicht geschriebener Compose-Freigaben)
+- `src/NcTalkOutlookAddIn/Controllers/ComposeShareLifecycleController.cs` (Löschung nicht persistierter oder nicht eingefügter Serverartefakte über den exakten Ursprung sowie Body-, Empfänger-, Absender-, Secrets- und Signaturaufbereitung der Passwortmail)
 - `src/NcTalkOutlookAddIn/Controllers/TalkDescriptionTemplateController.cs` (Talk-Template-/Block-Rendering)
 - `src/NcTalkOutlookAddIn/Controllers/OutlookRecipientResolverController.cs` (SMTP- und Attendee-Aufloesung)
 - `src/NcTalkOutlookAddIn/Controllers/MailComposeSubscriptionRegistryController.cs` (Compose-Subscription-Registry)
 - `src/NcTalkOutlookAddIn/Controllers/MailInteropController.cs` (gemeinsame Mail-/Inspector-Interop-Helper und einheitlicher WordEditor-Signatur-Slot-Reconciler)
 - `src/NcTalkOutlookAddIn/Models/SeparatePasswordDispatchEntry.cs` (gemeinsames Queue-Modell fuer separaten Passwort-Follow-up)
 - `src/NcTalkOutlookAddIn/Settings/ManagedSetupPolicy.cs` (verwaltete Nextcloud-URL aus Registry/GPO)
+- `src/NcTalkOutlookAddIn/Settings/SettingsFileTransaction.cs` (serialisiert Profil-Schreibvorgänge über einen benannten Mutex, ersetzt nur validierte Dateien und behält die letzte gültige Sicherung)
 
 Services:
 
@@ -185,6 +172,10 @@ Services:
   - Alle Runtime-HTTP-Aufrufe (Talk, Share/DAV, IFB, Login-Flow, Moderator-Avatar-Fetch) laufen zentral ueber `NcHttpClient`.
 - `src/NcTalkOutlookAddIn/Services/EmailSignaturePolicyService.cs` (loest Backend-E-Mail-Signatur-Policy gegen lokale Settings und Lock-State auf)
 - `src/NcTalkOutlookAddIn/Services/UpdateCheckService.cs` (fragt einmal pro Tag `nc-connector.de` nach Outlook-Release-Metadaten und speichert das Ergebnis in den Profil-Settings)
+- `src/NcTalkOutlookAddIn/Services/TalkAppointmentSyncCoordinator.cs` (fasst entfernte Talk-Aktualisierungen aus Outlook-Ereignissen zusammen)
+- `src/NcTalkOutlookAddIn/Services/TalkRoomLifecycleCoordinator.cs` und `TalkRoomLifecycleStore.cs` (Persistenz und Wiederholung vorgemerkter Raumlöschungen ohne Outlook-Kalenderscan)
+- `src/NcTalkOutlookAddIn/Services/IfbRegistryOwnershipManager.cs` und `IfbRegistryStateStore.cs` (IFB-Registry-Wiederherstellung); `FreeBusyServer.cs` prüft den geheimen Anfragepfad und begrenzt parallele Anfragen.
+- `src/NcTalkOutlookAddIn/Services/ProtectedJsonStateStore.cs` stellt den gemeinsamen Pfad für DPAPI-geschütztes JSON und Backup-Wiederherstellung der Talk-Löschwarteschlange und des IFB-Registry-Besitzstatus bereit. Schreibvorgänge bevorzugen den atomaren Austausch und behalten den bestehenden Copy-Fallback; die typisierten Stores behalten ihre fachlichen Dateinamen, Entropie, Validierung und Diagnosemeldungen.
 
 Update-Check:
 
@@ -203,25 +194,19 @@ UI:
 
 Utilities:
 
-- `src/NcTalkOutlookAddIn/Utilities/BrowserLauncher.cs` (zentraler Shell-Start fuer URLs, Dateien und Ordner)
+- `src/NcTalkOutlookAddIn/Utilities/BrowserLauncher.cs` (zentraler Shell-Start für Dateien und Ordner; `OpenUrl` lehnt Nicht-HTTPS-Ziele ab)
 - `src/NcTalkOutlookAddIn/Utilities/SizeFormatting.cs` (zentrale MB-Formatierung fuer UI-Texte)
 - `src/NcTalkOutlookAddIn/Utilities/ComInteropScope.cs` (zentrale COM-Release-/FinalRelease-Helfer)
 - `src/NcTalkOutlookAddIn/Utilities/PasswordGenerationHelper.cs` (zentralisiert Min-Length-Aufloesung, Server-Fallback-Generierung und gemeinsame Min-Length-Validierung fuer Talk/FileLink-Formulare)
 - `src/NcTalkOutlookAddIn/Utilities/FileLinkPath.cs` (zentrale Normalisierung, Kombination, Benennung, Bereinigung und Tiefenberechnung für FileLink-Pfade)
-- `src/NcTalkOutlookAddIn/Utilities/HtmlTemplateSanitizer.cs` (zentraler Sanitizer fuer Backend-HTML-Templates bei Share/Talk, fail-closed)
+- `src/NcTalkOutlookAddIn/Utilities/HtmlTemplateSanitizer.cs` (zentrale HtmlSanitizer-9.0.892-Policy für Backend-HTML bei Freigaben und Talk; aktive Inhaltscontainer wie `template` werden entfernt)
 - `src/NcTalkOutlookAddIn/Utilities/HtmlToPlainTextConverter.cs` (DOM-basierte HTML-zu-Plain-Text-Ausgabe fuer Plain-Text-E-Mail-Signaturen)
 - `src/NcTalkOutlookAddIn/Utilities/NcJson.cs` (zentrale JSON-Normalisierung inkl. `PrepareJsonPayload`, Dictionary-/String-/Int-Helfer und OCS-Fehlerextraktion)
 - `src/NcTalkOutlookAddIn/Utilities/DeferredAppointmentEnsureState.cs` (gekapselter Laufzeitzustand fuer Pending-Keys und Restriction-Log-Throttling)
+- `src/NcTalkOutlookAddIn/Utilities/NextcloudUriValidator.cs` (HTTPS-Basis-URL-Prüfung und Same-Origin-Prüfung für serverseitig gelieferte Endpunkte)
 - `src/NcTalkOutlookAddIn/Utilities/PictureConverter.cs` (gemeinsamer Image->IPictureDisp-Helfer fuer Ribbon-Icons)
 
-### Laufzeitkonfiguration und Policy-Verarbeitung
-
-- `Settings/SettingsStorage.cs` wählt eine profilspezifische XML-Datei unter `%LOCALAPPDATA%\NC4OL`, setzt Standardwerte für fehlende Einträge und schützt das App-Passwort mit Windows-DPAPI im `CurrentUser`-Kontext. Die Migration überträgt alte INI-Werte in Profildateien und entfernt Altdaten erst, wenn alle Zieldateien geschrieben wurden.
-- `Settings/ManagedSetupPolicy.cs` liest `HKLM` vor `HKCU` und unter 64-Bit-Windows die 64-Bit- vor der 32-Bit-Registry-Ansicht. Eine nicht gesperrte URL füllt ein leeres Profil; eine gesperrte URL überschreibt den Profilwert.
-- `Services/BackendPolicyService.cs` liest den optionalen Backend-Status für Einstellungen, Talk, FileLink, verwaltete Signaturen und die Raumlöschung gespeicherter Termine. Freigabe und Talk können bei fehlendem Backend oder Seat lokale Werte verwenden. Das Send-Gate für verwaltete Signaturen nutzt den strengeren Policy-Zustand aus dem nachfolgenden Signaturablauf.
-- Die TLS-Einstellung wird über `ServicePointManager.SecurityProtocol` angewendet. Verbindungstest und Login-Flow-Diagnose fordern über `NcHttpClient` eine neue Verbindung an, damit ein geänderter TLS-Modus mit einem neuen Handshake statt über eine vorhandene gepoolte Verbindung geprüft wird. Andere Laufzeit-HTTP-Aufrufe verwenden weiterhin den gemeinsamen Request-Executor.
-
-### Zentrale E-Mail-Signatur im Compose-Fenster
+#### Zentrale E-Mail-Signatur im Compose-Fenster
 
 Die Compose-Subscription wertet die zentrale Signatur nach dem Oeffnen einer Compose-Oberflaeche, nach Absender- oder BodyFormat-Aenderungen und ein letztes Mal in Outlooks abbrechbarem Send-Event aus.
 
@@ -247,37 +232,59 @@ Runtime-Regeln:
 - Signaturverarbeitung laeuft nur fuer ungesendete Outlook-Compose-Items. Das Oeffnen einer empfangenen oder bereits gesendeten Nachricht zum Lesen darf den Body nie veraendern.
 - Vor dem Senden stoppt Outlook den ausstehenden Debounce und gleicht aktuellen Absender, Format, Compose-Typ, Policy und verwalteten Slot synchron ab. Bei vollstaendigen Backend-Verbindungseinstellungen wird der Versand abgebrochen, wenn kein erfolgreicher Policy-Snapshot vorliegt oder ein erforderlicher finaler Apply-/Clear-Vorgang nicht sicher abgeschlossen werden kann. Das Compose-Item bleibt fuer Korrektur und erneuten Versand offen.
 - Eine unvollstaendige Backend-Einrichtung erzeugt keine Signaturpflicht; der Cleanup beschraenkt sich auf das best-effort Entfernen eines exakt gefundenen `NcConnectorSignature`-Bookmarks. Eine nicht unterstuetzte Signatur-Domain deaktiviert ebenfalls die Einfuegung, bei ansonsten vollstaendiger Backend-Einrichtung muss eine vorhandene verwaltete Range vor Send aber weiterhin sicher abgeglichen werden. Ein kurz vor Send eintreffendes `InlineResponseClose` blockiert eine bereits abgeglichene, unveraenderte Mail nicht allein wegen des fehlenden Inline-Editors.
-- Der separate Passwort-Follow-up-Dispatch verwendet den bereits beim Hauptversand erfolgreich geprueften Policy-Snapshot, bereinigt ihn einmal und nutzt ihn fuer die gesamte Queue. Er setzt und prueft `SendUsingAccount`/`SentOnBehalfOfName`, sendet nur automatisch, wenn die effektive Follow-up-Identitaet dem beim erfolgreichen Hauptversand erfassten Absender entspricht, und fuegt die Backend-Signatur nur ein, wenn diese effektive Identitaet zusaetzlich zu `policy.email_signature.user_email` passt. Eine Plain-Text-Quelle erzeugt einen Plain-Text-Follow-up; HTML/RTF erzeugt einen HTML-Follow-up. Derselbe Snapshot gilt fuer einen manuellen Fallback-Entwurf.
+- Der separate Passwort-Follow-up-Dispatch erfasst den erfolgreichen Policy- und Settings-Snapshot bereits beim Erstellen der Freigabe. Im `Send`-Ereignis der Hauptmail setzt und prueft er `SendUsingAccount`/`SentOnBehalfOfName`, übergibt nur automatisch, wenn die effektive Follow-up-Identitaet dem erfassten Absender der Hauptmail entspricht, und fuegt die Backend-Signatur nur ein, wenn diese Identitaet zusätzlich zu `policy.email_signature.user_email` passt. Eine Plain-Text-Quelle erzeugt einen Plain-Text-Follow-up; HTML/RTF erzeugt einen HTML-Follow-up. Bei eindeutig fehlgeschlagener automatischer Übergabe zeigt Outlook die vollständig vorbereitete Nachricht an; ein mehrdeutiger Übermittlungsstatus wird nie wiederholt.
 - Das Debug-Log erfasst Trigger, aktive Oberflaeche, Body-Format, Compose-Typ, Slot-Quelle und Abgleichsergebnis, schreibt aber weder Signatur-Template noch Absenderadresse.
 
-Compose-Filelink-Paritaet (3.1.0):
+### Laufzeitkonfiguration und Policy-Verarbeitung
+
+- `Settings/SettingsStorage.cs` wählt eine profilspezifische XML-Datei unter `%LOCALAPPDATA%\NC4OL`, setzt Standardwerte für fehlende Einträge und schützt das App-Passwort mit Windows-DPAPI im `CurrentUser`-Kontext. `SettingsFileTransaction` schreibt und validiert eine temporäre Datei unter einem profilbezogenen prozessübergreifenden Mutex, ersetzt danach die Primärdatei und behält die vorherige gültige Datei als `.bak`.
+- Ein fehlerhafter Passwortwert leert nur das Passwort und sperrt Settings-Schreibvorgänge im Hintergrund. Bei ungültiger Primär-XML wird die gültige Sicherung geladen. Ist keine gültige Datei vorhanden, bleiben automatische Schreibvorgänge gesperrt, bis das ausdrückliche Speichern im Einstellungsdialog erfolgreich war. Erst danach ändert sich die aktive Laufzeitkonfiguration.
+- `SettingsWorkflowController` persistiert die Kandidatenkonfiguration vor Änderungen an Laufzeit-, TLS- oder IFB-Zustand. Ein Schreibfehler lässt den Dialog geöffnet und zeigt den lokalisierten Speicherfehler.
+- `Settings/ManagedSetupPolicy.cs` liest `HKLM` vor `HKCU` und unter 64-Bit-Windows die 64-Bit- vor der 32-Bit-Registry-Ansicht. Eine nicht gesperrte URL füllt ein leeres Profil; eine gesperrte URL überschreibt den Profilwert.
+- `Utilities/NextcloudUriValidator.cs` akzeptiert nur HTTPS-Nextcloud-Basis-URLs ohne Benutzerinformationen, Query oder Fragment. Login-Flow- und Passwort-Policy-URLs aus Serverantworten müssen Schema, Host und Port der konfigurierten Basis-URL beibehalten.
+- `Services/BackendPolicyService.cs` liest den optionalen Backend-Status für Einstellungen, Talk, FileLink, verwaltete Signaturen und die Raumlöschung gespeicherter Termine. Freigabe und Talk können bei fehlendem Backend oder Seat lokale Werte verwenden. Das Send-Gate für verwaltete Signaturen nutzt den strengeren Policy-Zustand aus dem Signaturablauf.
+- Die TLS-Einstellung wird über `ServicePointManager.SecurityProtocol` angewendet. Zuvor setzt `TransportSecurityConfigurator` die .NET-Schalter für System-Default-TLS und starke Kryptografie programmatisch; die Auswahl hängt im von Outlook bereitgestellten AppDomain deshalb nicht allein von `NcTalkOutlookAddIn.dll.config` ab. Verbindungstest und Login-Flow-Diagnose fordern über `NcHttpClient` eine neue Verbindung an, damit ein geänderter TLS-Modus mit einem neuen Handshake statt über eine vorhandene gepoolte Verbindung geprüft wird.
+- `app.config` bildet die Versionen der gebündelten HtmlSanitizer-Abhängigkeiten ab. Der Laufzeit-Resolver bedient nur passende Anfragen des Add-ins und dieses Abhängigkeitsstapels aus dem Add-in-Verzeichnis; höhere Versionen, andere Tokens, Kulturen oder fremde Requester bleiben unberührt. `tools/ci/Check-VendorAssemblyBindings.ps1` lädt jede transitive Vendor-Referenz in einer frischen .NET-Framework-AppDomain mit diesen Redirects.
+
+### Ende-zu-Ende-Abläufe
+
+#### Talk-Link-Ablauf (Termine)
+
+1. Der Benutzer klickt in einem Termin auf **Talk-Link einfügen**.
+2. `TalkLinkForm` erfasst Titel, Passwort, Lobby, Sichtbarkeit, Raumtyp, Teilnehmersynchronisierung und optionales Ziel der Moderatorübergabe.
+3. `TalkRibbonController` lädt Backend- und Passwort-Policy parallel, bevor der Wizard geöffnet wird. Ein Delegationsziel wird als eigener Benutzer abgelehnt, wenn es zur kanonischen UID, zum konfigurierten Login oder zur bekannten primären E-Mail-Adresse passt.
+4. `TalkService` erstellt den Raum. `TalkAppointmentController.ApplyRoomToAppointment(...)` schreibt URL, lokalisierten Body-Block und `X-NCTALK-*`-Metadaten in den Termin.
+5. Beim Speichern liest die Appointment-Subscription die benötigten Outlook-Werte auf dem STA-Thread. `TalkAppointmentSyncCoordinator` fasst unveränderliche Snapshots zusammen und führt Lobby-, Beschreibungs-, Teilnehmer- und Delegationsaufrufe im Hintergrund aus.
+6. `BeforeDelete` verwendet Outlooks terminspezifisches Löschereignis. Organizer-, Token-, Delegations- und Serienprüfung laufen an diesem Termin, bevor `QueueSavedTalkRoomDeletion(...)` einen Löschauftrag mit `PolicyRequired=true` erstellt; URL- oder Ortsauswertung ist keine Löschquelle. Der Hintergrund-Worker wertet die wirksame `TalkDeleteRoomOnEventDelete`-Policy vor der Raumlöschung aus. Derselbe Ereignispfad gilt für die Löschung aus dem geöffneten Termin und aus der Kalenderansicht. `Explorer.SelectionChange` bindet nur ausgewählte Talk-Termine; beim Hook jedes Explorers wird dessen aktuelle Auswahl einmal verarbeitet, damit die Kalenderlöschung direkt nach einem Outlook-Neustart ohne vorheriges Öffnen funktioniert.
+7. Beim Start werden nur der persistente Lösch-Retry-Worker und bestehende Explorer-Oberflächen initialisiert. Stores oder Kalenderordner werden nicht aufgezählt, Kalenderelemente nicht durchsucht und keine ordnerbezogenen `Items`-Subscriptions gehalten.
+8. Die DPAPI-geschützte Löschqueue besitzt Primärdatei und Sicherung. Die Nextcloud-Löschung läuft im Hintergrund; fehlgeschlagene Löschungen werden verzögert und nach einem Outlook-Neustart wiederholt. Die Bereinigung eines neu erstellten Raums aus einem ungespeicherten und verworfenen Termin verwendet dieselbe Queue mit `PolicyRequired=false`. Beim Laden älterer Zustände bleiben nur bereits zur Löschung vorgemerkte Einträge erhalten; reine Tracking-Einträge werden verworfen.
+
+#### HTML-Subset für Talk-Termine (Backend-Vorlagen)
+
+Backend-Talk-Templates verwenden für die Outlook-Word-/RTF-Pipeline bevorzugt Tabellen (`table`, `tbody`, `tr`, `td`). Der Kompatibilitätsschritt entfernt `display:flex|grid`, `flex*`, `grid*`, `border-radius*`, `overflow*`, `object-fit` und `user-select`, ergänzt Legacy-Attribute für Farbe und Ausrichtung und entfernt nicht erlaubte Tags oder Attribute.
+
+#### Freigabeablauf (E-Mail verfassen)
 
 - Der FileLink-Ribbon-Einstieg ist im Mail-Inspector und im Explorer-Tab `Nachricht` fuer Inline-Antworten/-Weiterleitungen sichtbar. Beide Einstiege laufen ueber denselben `FileLinkLaunchController`.
+- Der Wizard startet mit den gespeicherten lokalen FileLink-Vorgaben. Ein gesperrter Share-Policy-Wert überschreibt den zugehörigen lokalen Wert; ein editierbarer Wert lässt die gespeicherte Outlook-Einstellung unverändert.
 - Inline-Antworten/-Weiterleitungen fuegen das gerenderte Freigabe-HTML ueber `Explorer.ActiveInlineResponseWordEditor` ein; der Inline-Pfad schreibt nicht direkt in `MailItem.HTMLBody` und behaelt zwei leere Absaetze ueber dem Freigabeblock fuer eigenen Text.
 - Normale HTML-Compose-Fenster verwenden zuerst den Inspector-WordEditor, damit verwaltete Bookmarks erhalten bleiben. Nur wenn dieser Editor nicht geoeffnet werden kann, bleibt die direkte `MailItem.HTMLBody`-Route als Kompatibilitaetsfallback aktiv.
-- `MailComposeSubscription` in `NextcloudTalkAddIn.cs` steuert den Compose-Lifecycle fuer:
-  - debouncte Anhangsauswertung (`ComposeAttachmentEvalDebounceMs`)
-  - Pre-Add-Abfangpfad (`BeforeAttachmentAdd`) fuer fruehes Intercept
-  - best-effort Abbruch des Host-Adds vor der normalen Outlook-Post-Add-Verarbeitung
-  - harte Outlook-/Exchange-Groessenlimits koennen trotzdem vor Add-in-Callbacks greifen und sind ueber offizielle Outlook-OOM-Events nicht abfangbar
-  - Always-via-NC und Schwellwertmodus
-  - Batch-Entfernung (`Remove last selected attachments`)
-  - Attachment-Mode-Wizardstart direkt im Datei-Schritt
-  - Share-Cleanup bei unsent close inkl. Grace-Timer fuer Send/Close-Race
-  - separates Passwort-Follow-up nach bestaetigtem erfolgreichem Hauptversand; Empfaenger und Absenderkonto werden beim Senden aus dem Original-Compose uebernommen
-  - bei Backend-Policy `Nextcloud Secret Link` wird die finale Empfaengerliste aufgeteilt und pro Empfaenger ein eigener einmaliger Secrets-Link erstellt
-  - Secrets-Links werden lokal per AES-GCM ueber Windows CNG verschluesselt; es wird keine neue Crypto-Abhaengigkeit gebuendelt
-  - wenn Secrets-Erstellung fehlschlaegt, faellt der Versand auf die bisherige separate Klartext-Passwortmail zurueck und zeigt einen Hinweis.
-- `ComposeShareLifecycleController` kapselt die eigentliche Share-Cleanup-/Passwort-Dispatch-Logik; `MailComposeSubscription` haelt nur Queue- und Eventzustand.
-- `TalkAppointmentController` kapselt Appointment-Schreib-/Sync-Pfade; `NextcloudTalkAddIn` delegiert diese Aufrufe statt die komplette Fachlogik im Root zu halten.
-- Nach Appointment-Write werden die lokalen Outlook-`X-NCTALK-*`-Metadaten aktualisiert; serverseitige CalDAV-VEVENTs werden dafuer nicht gepatcht.
-- Gespeicherte Talk-Termine stellen die entfernte Raumloeschung nur mit Opt-in (`TalkDeleteRoomOnEventDelete` bzw. Backend-Policy `talk_delete_room_on_event_delete`) und vorhandenen `X-NCTALK-TOKEN`-Metadaten im Hintergrund an; generische Talk-URLs in `Location`/URL-Feldern werden nicht als Loeschquelle ausgewertet.
-- Der Cleanup fuer verworfene, noch nicht gespeicherte neue Termine bleibt davon getrennt aktiv.
-- Ribbon-getriggerte Flows werden im Controller-Slice gehalten (`SettingsWorkflowController`, `FileLinkLaunchController`, `TalkRibbonController`); `NextcloudTalkAddIn.cs` bleibt schlanke Delegate-/Composition-Root-Schicht.
-  - Lifecycle-, Policy-/Template- und Deferred-Ensure-Logik sind in eigene Partial-Dateien ausgelagert, damit die Root-Klasse wartbar bleibt.
-  - Custom-Talk-Templates aus dem Backend werden vor HTML-/Plain-Text-Rendering ueber `HtmlTemplateSanitizer` bereinigt (kein Raw-HTML-Fallback).
-  - fuer Talk-Termine laeuft vor dem Insert ein expliziter Compat-Transform (`HtmlTemplateSanitizer.PrepareTalkAppointmentHtmlForOutlookRtfBridge(...)`)
-  - Appointment-HTML wird ueber HTML->RTF-Bridge geschrieben (`MailItem.HTMLBody` -> `AppointmentItem.RTFBody`), nicht ueber `AppointmentItem.HTMLBody` und nicht ueber `HTMLEditor.body.innerHTML`.
+- `MailComposeSubscription` debounct Anhangsänderungen und verarbeitet Always-via-NC sowie den Schwellwertmodus. `BeforeAttachmentAdd` versucht die Dateidaten früh zu erfassen; bei einer erzwingenden Policy wird ein nicht materialisierbarer oder nicht prüfbarer Host-Anhang abgebrochen. Harte Outlook-/Exchange-Grenzen können weiterhin vor einem Add-in-Ereignis greifen.
+- Outlook-Body-Ressourcen mit `PR_ATTACHMENT_HIDDEN=true`, beispielsweise Signaturbilder, werden weder in Anhangs-Batches und Schwellwertsummen noch in FileLink-Auswahl, Host-Entfernung oder Send-Gate einbezogen.
+- `NextcloudTalkAddIn.TryInsertHtmlIntoMail(...)` und `TryInsertPlainTextIntoMail(...)` geben den Einfügestatus von `MailInteropController` zurück. Scheitern alle Einfügepfade, stellt `FileLinkLaunchController` die neu erzeugten Serverartefakte zur Bereinigung ein und meldet den Wizard als fehlgeschlagen.
+- `ComposeLifecycleOrigin` hält den exakten Server-/Kontokontext für das Löschen der erstellten Freigabe oder eine spätere Secrets-Anfrage. Die Bereinigung fällt nie auf das aktuell ausgewählte Konto zurück.
+- Kann eine neu erstellte Freigabe nicht in die Mail eingefügt werden, versucht der Controller, ihren Serverordner mit diesem erfassten Kontext zu löschen.
+- Nach erfolgreicher Einfügung verfolgt `MailComposeSubscription` den `ComposeShareCleanupRecord`, bis Outlook `AfterWrite` auslöst. Ein abgeschlossener Schreibvorgang umfasst Speichern, automatisches Speichern und den Schreibvorgang für Versand/Postausgang; diese Pfade geben den Bereinigungseintrag frei, ohne die Freigabe zu löschen.
+- Klassische Compose-Fenster binden das konkrete `InspectorEvents_10.Close`-Ereignis. Es wird erst ausgelöst, wenn dieser Inspector tatsächlich schließt. Folgte auf die Einfügung kein erfolgreicher Schreibvorgang, stößt die Subscription die Löschung mit dem erfassten Konto und relativen Pfad an. Ein abgebrochener Schließvorgang lässt den Bereinigungsstatus daher aktiv.
+- Inline-Compose behandelt `Explorer.InlineResponseClose` nur als Oberflächenwechsel, weil Outlook das Ereignis auch bei Pop-out und Navigation auslöst. `ItemEvents_10.Unload` bleibt dort das abschließende Item-Signal und wertet ausschließlich den vorher erfassten Bereinigungsstatus aus, ohne auf das entladene `MailItem` zuzugreifen.
+- DAV-Bereinigungen nutzen den gemeinsamen begrenzten FileLink-Retry-Pfad. Ein wiederholtes Löschen bleibt idempotent, weil ein bereits fehlender Ordner akzeptiert wird.
+- Die Bereinigungsverfolgung liegt im Arbeitsspeicher. Hat Outlook die Nachricht geschrieben, löscht das spätere Löschen dieses gespeicherten Entwurfs – auch nach einem Outlook-Neustart – die Freigabe nicht; die ungenutzte Freigabe muss manuell entfernt werden.
+- `RegisterSeparatePasswordDispatch` hält die Daten für den Passwort-Follow-up zunächst nur in `_passwordDispatchQueue` der Subscription. Speichern und AutoSave schreiben diese Queue nicht in die Hauptmail. Beim Schließen des Verfassen-Fensters wird die Subscription verworfen; ein erneut geöffneter Entwurf, ein Outlook-Neustart vor dem ersten Sendeversuch oder eine neue Nachricht aus einer `.oft`-Vorlage kann den Follow-up-Zustand deshalb nicht wiederherstellen.
+- `OnSend` ist die direkte Übergabegrenze. Die Queue wird einmal verbraucht, der endgültige Secrets-/Klartextinhalt erzeugt, Empfänger und wirksames `SendUsingAccount`/`SentOnBehalfOfName` der Hauptmail übernommen, Body und passende Backend-Signatur fertiggestellt, Empfänger aufgelöst und der Follow-up ohne zwischengespeicherten Outlook-Entwurf übergeben.
+- Für die Passwortzustellung werden weder Entwürfe, Postausgang, Gesendet-Ordner, MIME-Marker noch eine Neustart-Wiederherstellung verwendet. Auch Outlooks verzögerte oder Offline-Übermittlung ruft `OnSend` auf; der Passwort-Follow-up wird deshalb sofort übergeben und wartet nicht auf die Hauptmail im Postausgang. Unerwartete Follow-up-Fehler setzen das `cancel`-Flag der Hauptmail nie.
+- Das Send-Gate bricht den Versand bei einer erzwingenden Anhangs-Policy ab, solange noch ein gewöhnlicher regelwidriger Anhang vorhanden ist.
+- `ComposeShareLifecycleController` übernimmt Aufbereitung und direkte Übergabe der Passwortmail. SMTP-Adressen werden gemeinsam über An, Cc und Bcc dedupliziert. Im Secrets-Modus entsteht ein Einmal-Link pro eindeutiger Adresse. Bei eindeutigem Auto-Send-Fehler wird genau ein vollständig vorbereiteter manueller Fallback geöffnet; bei mehrdeutigem Outlook-Status wird kein Duplikat erzeugt. Scheitert die strikte Absender- oder Empfängeraufbereitung vor der Übergabe, verwendet der Controller denselben Fallback mit normalisierten An-/Cc-/Bcc-Feldern und gleicht die verwaltete Signatur nach Initialisierung des Inspectors ab.
+- Secrets-Links werden lokal per AES-GCM über Windows CNG verschlüsselt. Schlägt die Secrets-Erstellung fehl, wird die Klartext-Passwortmail verwendet und ein Hinweis angezeigt.
 - `OutlookAttachmentAutomationGuardService` erzwingt den Host-Konflikt-Guard live:
   - vor Auswertung
   - vor Prompt-Aktionsverarbeitung
@@ -286,6 +293,7 @@ Compose-Filelink-Paritaet (3.1.0):
 - `AttachmentMode` steuert Read-only-Berechtigungen, das Ausblenden der Rechtezeile und Cleanup. Das explizite Linkziel steuert nur URL, `{LINK_INTRO}` und `{LINK_LABEL}`; manuelle Freigaben bleiben immer auf der Nextcloud-Freigabeseite. Im Wizard gibt es keinen Schalter pro Freigabe.
 - Die ZIP-URL-Ableitung ist fail-closed: Die absolute oeffentliche HTTP(S)-URL muss auf `/s/<token>` enden und zum OCS-Token passen. Ungueltige Eingaben brechen vor dem Einfuegen ab; es gibt keinen Fallback auf die Original-URL.
 - Custom-Share-Templates aus dem Backend werden im `FileLinkHtmlBuilder` vor der Einfuegung ueber `HtmlTemplateSanitizer` bereinigt (fail-closed).
+- Vor der Platzhalterersetzung entfernt der Renderer bei leeren optionalen Werten den naechsten umgebenden Block. Feste Beschriftungen wie `Passwort` bleiben deshalb weder in HTML- noch in Plain-Text-Ausgaben ohne Wert stehen.
 - `{LINK_INTRO}` und `{LINK_LABEL}` werden anhand des effektiven Linkziels aufgeloest. Bestehende Templates ohne diese Platzhalter behalten ihre bisherige Ausgabe.
 - Fuer Custom-Share-Templates bevorzugt Outlook `policy.share.share_html_block_template_v2` und faellt auf `policy.share.share_html_block_template` zurueck. Damit funktionieren aeltere Backend-Versionen weiter, waehrend aktuelle Backends den bisherigen Antwortschluessel fuer aeltere Clients platzhalterfrei halten koennen.
 - Aktuelle Backends liefern fuer Custom-Templates `policy.share.share_html_block_effective_language`. Outlook verwendet diese Sprache fuer erzeugte Linktexte, Feldbezeichnungen, Berechtigungsnamen und Passworthinweise; bei aelteren Backends ohne dieses Feld bleibt der bisherige Fallback auf die UI-Sprache erhalten.
@@ -293,43 +301,140 @@ Compose-Filelink-Paritaet (3.1.0):
 - `FileLinkWizardForm` akzeptiert im Datei-Schritt Explorer-Drag-and-drop fuer Dateien/Ordner ueber Queue und Aktionsbereich.
 - `FileLinkTransferService` nutzt fuer Dateien bis 20 MiB einen direkten WebDAV-`PUT`. Groessere Dateien laufen ueber Nextcloud Chunked Upload v2 unter `/remote.php/dav/uploads/<user>/<upload-id>` und werden danach per `MOVE .file` an den finalen DAV-Pfad zusammengesetzt.
 
-### Filelink-Upload-Architektur
+##### Upload-Architektur
 
 - Alle Funktionen setzen Nextcloud 32 oder neuer voraus. `NextcloudCapabilitiesService` validiert die strukturierte Version der authentifizierten OCS-Capabilities-Antwort und speichert den typisierten Snapshot fünf Minuten pro Server/Benutzer zwischen. Verbindungsprüfungen aktualisieren ihn; Funktionseinstiege lehnen ältere Server oder Antworten ohne auswertbare Version ab.
 - `FileLinkService` orchestriert die fachlich getrennten Komponenten für Planung, DAV-Verzeichnisse, Transfer, Share-Erstellung und Fortschritt.
 - `FileLinkSelectionScanner` scannt die lokale Auswahl vor der ersten serverseitigen Änderung einmal. Das relativ zum Freigabe-Stammordner aufgebaute Ergebnis bewahrt leere Verzeichnisse, lehnt symbolische Links und Junctions ab und speichert Dateigröße sowie Änderungszeit. `FileLinkUploadPlanner` weist anschließend die Transferarten zu, ohne den Server zu verändern.
-- Beim Weiter aus dem ersten Schritt prüft der manuelle Wizard den aus Basispfad, festgehaltenem Wizard-Datum und bereinigtem Freigabenamen abgeleiteten Zielpfad mit einem DAV-`PROPFIND` der Tiefe null. Ein vorhandenes Ziel hält den Wizard im ersten Schritt. `FileLinkDavClient` reserviert den Freigabe-Stammordner beim späteren Upload trotzdem atomar mit `MKCOL`, damit eine Kollision zwischen Vorprüfung und Upload sicher abbricht. Die Anhangsautomatisierung überspringt die Vorprüfung und probiert weiterhin nummerierte Freigabenamen. Leere Verzeichnisse, für Bulk oder Chunked benötigte Elternpfade und von mehreren Direct-Dateien gemeinsam genutzte Eltern werden einmal, Eltern vor Kindern, mit maximal drei parallelen Requests pro Ebene angelegt. Direct-Pfadketten mit nur einer Datei legt `X-NC-WebDAV-Auto-Mkcol` an.
+- Beim Weiter aus dem ersten Schritt prüft der manuelle Wizard den aus Basispfad, festgehaltenem Wizard-Datum und bereinigtem Freigabenamen abgeleiteten Zielpfad mit einem DAV-`PROPFIND` der Tiefe null. Ein vorhandenes Ziel hält den Wizard im ersten Schritt. `FileLinkDavClient` reserviert den Freigabe-Stammordner beim späteren Upload atomar mit `MKCOL`, damit eine Kollision zwischen Vorprüfung und Upload sicher abbricht. Ein `405` nach einem unklaren ersten Ergebnis gilt nur dann als erfolgreiche Reservierung, wenn ein DAV-`PROPFIND` der Tiefe null den exakten Pfad als Collection bestätigt. Ein bekannter `405` ohne vorherige Unklarheit bleibt eine Kollision. Die Anhangsautomatisierung überspringt die Vorprüfung und probiert weiterhin nummerierte Freigabenamen. Leere Verzeichnisse, für Bulk oder Chunked benötigte Elternpfade und von mehreren Direct-Dateien gemeinsam genutzte Eltern werden einmal, Eltern vor Kindern, mit maximal drei parallelen Requests pro Ebene angelegt. Direct-Pfadketten mit nur einer Datei legt `X-NC-WebDAV-Auto-Mkcol` an.
 - `FileLinkTransferService` koordiniert getrennte Bulk-, Direct- und Chunked-Uploader. Dateien außerhalb von Bulk bis 20 MiB werden mit dem serverseitig ausgewerteten Header `X-NC-WebDAV-Auto-Mkcol: 1` über direkte `PUT`-Requests hochgeladen. Dateien über 20 MiB verwenden Chunked Upload v2. Direct- und Chunked-Dateien teilen sich das Limit von maximal drei parallelen Transfers.
-- Nur wenn `ocs.data.capabilities.dav.bulkupload` exakt `"1.0"` meldet, kommen mindestens 20 Kandidaten mit höchstens 8 MiB pro Datei für DAV-Bulk infrage. Sequentielle Multipart-Batches sind auf 100 Dateien und ungefähr 20 MiB begrenzt. Der Planner wählt Bulk nur, wenn mindestens 20 Prozent aller Upload-Requests entfallen. Die Berechnung umfasst Basispfad, Freigabe-Stammordner, geplante Verzeichnisse, direkte Dateien sowie jeden Chunk-Ordner, Chunk-`PUT` und abschließenden `MOVE`.
+- Nur wenn `ocs.data.capabilities.dav.bulkupload` exakt `"1.0"` meldet, kommen mindestens 20 Kandidaten mit höchstens 8 MiB pro Datei für DAV-Bulk infrage. Sequentielle Multipart-Batches sind auf 100 Dateien und ungefähr 20 MiB begrenzt. Der Planner wählt Bulk nur, wenn mindestens 20 Prozent aller Upload-Requests entfallen. Die Berechnung umfasst Basispfad, Freigabe-Stammordner, geplante Verzeichnisse, direkte Dateien sowie jeden Chunk-Ordner, Chunk-`PUT` und abschließenden `MOVE`. Vor der ersten Serveränderung meldet die sequenzielle MD5-Berechnung ihren aktuellen und gesamten Dateizähler als eigene Wizard-Phase.
 - Nach Abschluss aller Transfers sendet `FileLinkShareClient` genau einen OCS-Create-Share-`POST` mit Pfad, expliziten Berechtigungen, Passwort, Ablaufdatum, Label und Notiz. Der veraltete Parameter `publicUpload` entfällt, weil Nextcloud damit die explizite Berechtigungsmaske ersetzen würde. Ein nachträglicher Metadaten-`PUT` findet nicht statt.
 - Bei ausbleibender Antwort, einer temporären Gateway-/Service-Antwort ohne OCS-Ergebnis oder einer erfolgreichen Antwort ohne verwertbare Freigabedaten ist das Ergebnis des Erstellaufrufs unklar. `FileLinkShareClient` merkt sich den Pfad und führt vor einem weiteren Erstellaufruf eine OCS-Abfrage für exakt diesen Pfad ohne untergeordnete Freigaben aus. Eine passende öffentliche Freigabe wird übernommen; ein neuer Versuch erfolgt nur nach einem bestätigten leeren Ergebnis. Solange die Abfrage selbst unklar bleibt, wird kein zweiter Erstellaufruf gesendet.
 - Wiederholbare `MKCOL`-, direkte `PUT`-, Chunk-`PUT`- und Bulk-`POST`-Operationen erhalten bei Transportfehlern und ausgewählten temporären HTTP-Antworten maximal zwei Wiederholungen. Jeder Bulk-Versuch baut denselben Request-Body aus dem unveränderten lokalen Plan neu auf. Ein abschließendes Chunk-`MOVE` wird nie blind ein zweites Mal gesendet: Nach einem unklaren Transportergebnis wird das exakte Ziel mit einem DAV-Depth-0-Request geprüft und nur als erfolgreich gewertet, wenn es keine Collection ist und die erwartete Länge besitzt.
-- `FileLinkUploadProgress` begrenzt den Phasen-Fortschritt auf maximal zehn Meldungen pro Sekunde. Der Wizard zeigt Scan, Ordnervorbereitung sowie aggregierte Dateien, Bytes und Transferrate; das Debug-Log schreibt Plan, Wiederholungen, aggregierten Fortschritt im Fünf-Sekunden-Takt und Abschluss.
+- Der Wizard zeigt Scan, Prüfsummenberechnung, Ordnervorbereitung sowie aggregierte Dateien, Bytes und Transferrate. Zwischenstände der Prüfsummen- und Transferphasen sind auf maximal zehn Meldungen pro Sekunde begrenzt; das Debug-Log schreibt Plan, Wiederholungen, aggregierten Fortschritt im Fünf-Sekunden-Takt und Abschluss.
 
-### Appointment-sicheres HTML-Subset fuer Talk-Templates
+#### IFB-Ablauf
 
-Damit Backend-Talk-Templates in Outlook-Terminen stabil gerendert werden (Word/RTF-Pipeline), gilt:
+1. Der Benutzer aktiviert IFB in den Einstellungen.
+2. `FreeBusyManager` erzeugt für jeden Outlook-Prozess ein zufälliges Request-Secret. `IfbRegistryStateStore` hält den DPAPI-geschützten Besitzstand mit Primär-/Backup-Wiederherstellung.
+3. `FreeBusyServer` startet den Loopback-Listener, akzeptiert nur `/nc-ifb/<request-secret>/freebusy/<address>.vfb` und begrenzt gleichzeitige Proxy-Anfragen auf vier.
+4. `IfbRegistryOwnershipManager` merkt sich jeden ursprünglichen Benutzerwert und registriert `%NAME%@%SERVER%.vfb` unterhalb des geheimen Endpunkts. Outlook ersetzt beide Platzhalter durch die vollständige SMTP-Adresse des Teilnehmers. Policy-Werte werden nur auf Konflikte geprüft.
+5. Beim Upgrade übernimmt der Manager einen nicht zugeordneten alten `/nc-ifb/freebusy/...`-Wert nur in der Form ohne Token. Ein nicht zugeordneter tokenisierter Pfad bleibt gesperrt. Ohne gespeicherten externen Vorgängerwert entfernt das Deaktivieren von IFB den alten Wert, statt ihn wiederherzustellen.
+6. Beim Deaktivieren wird ein ursprünglicher Wert nur wiederhergestellt, wenn der aktuelle Wert noch dem von NC Connector geschriebenen Wert entspricht.
+7. `IfbAddressBookCache` trennt Einträge nach Outlook-Profil, normalisierter Nextcloud-Basis-URL einschließlich Unterpfad und kanonischer Nextcloud-UID.
 
-- Layout bevorzugt tabellenbasiert aufbauen (`table`, `tbody`, `tr`, `td`).
-- Inline-Styles sind erlaubt, aber Word-kritische CSS-Features werden im Appointment-Compat-Transform entfernt:
-  - `display:flex|grid`, `flex*`, `grid*`, `border-radius*`, `overflow*`, `object-fit`, `user-select` (inkl. vendor-prefix Varianten).
-- Farbausrichtung bekommt zusaetzliche Legacy-Fallbacks:
-  - `style=color` -> `<font color=...>`
-  - `style=background-color` -> `bgcolor`
-  - `style=text-align` -> `align`
-  - `style=vertical-align` -> `valign`
-- Linkfarbe wird zusaetzlich abgesichert (`<a><font color=...>...</font></a>`), falls erforderlich.
-- Unsichere/nicht erlaubte Tags/Attribute entfernt der Sanitizer weiterhin fail-closed.
+## Netzwerk-Endpunkte
 
-Installer:
+Das Add-in verwendet Nextcloud-**OCS**- und **WebDAV**-Endpunkte.
 
-- `installer/NcConnectorOutlookInstaller.wixproj` (WiX-v6-SDK-Projekt)
-- `installer/Product.wxs` (MSI Definition: Dateien + Registry + URLACL)
-- `VENDOR.md` (Lizenzhinweise fuer gebuendelte Drittanbieter-Abhaengigkeiten)
+`NextcloudUriValidator` normalisiert die konfigurierte Basis-URL vor der Erstellung authentifizierter Services. Die Laufzeitkonfiguration lehnt explizites HTTP, Benutzerinformationen, Query und Fragment ab. Absolute Login-Flow- und Passwort-Policy-Endpunkte aus Nextcloud-Antworten müssen HTTPS verwenden und zu Schema, Host und Port der konfigurierten Basis-URL passen.
 
-## Versionierung & Release
+Authentifizierungsalias und DAV-Identität bleiben getrennt: Basic Auth verwendet den eingegebenen Login, während `Services/NextcloudUserIdentityService.cs` die kanonische UID über `GET /ocs/v2.php/cloud/user?format=json` ermittelt. Benutzerbezogene FileLink-, CardDAV- und CalDAV-Pfade verwenden ausschließlich `ocs.data.id`; eine fehlende UID ist ein Fehler.
 
-### Version bump
+Talk (Auswahl):
+
+- Capabilities/Versionshinweis: `GET /ocs/v2.php/cloud/capabilities`
+- Raum erstellen: `POST /ocs/v2.php/apps/spreed/api/v4/room`
+- Raum löschen: `DELETE /ocs/v2.php/apps/spreed/api/v4/room/<token>`
+- Lobby-Timer: `PUT /ocs/v2.php/apps/spreed/api/v4/room/<token>/webinar/lobby`
+- Sichtbarkeit: `PUT /ocs/v2.php/apps/spreed/api/v4/room/<token>/listable`
+- Beschreibung: `PUT /ocs/v2.php/apps/spreed/api/v4/room/<token>/description`
+- Teilnehmer hinzufügen: `POST /ocs/v2.php/apps/spreed/api/v4/room/<token>/participants`
+- Teilnehmer lesen: `GET /ocs/v2.php/apps/spreed/api/v4/room/<token>/participants?includeStatus=true`
+- Moderator hochstufen: `POST /ocs/v2.php/apps/spreed/api/v4/room/<token>/moderators`
+- Raum selbst verlassen: `DELETE /ocs/v2.php/apps/spreed/api/v4/room/<token>/participants/self`
+
+Freigaben:
+
+- Capabilities und erforderliche Serverversion: `GET /ocs/v2.php/cloud/capabilities?format=json`
+- Aktuelle kanonische Benutzer-ID: `GET /ocs/v2.php/cloud/user?format=json`
+- Öffentliche Freigabe erstellen: `POST /ocs/v2.php/apps/files_sharing/api/v1/shares`
+- Upload/Ordneranlage: `remote.php/dav/...` (WebDAV)
+- Optionaler Bulk-Upload kleiner Dateien: `POST /remote.php/dav/bulk` (`multipart/related`, nur bei exakt `ocs.data.capabilities.dav.bulkupload = "1.0"`)
+- Upload großer Dateien: `MKCOL /remote.php/dav/uploads/<user>/<upload-id>`, Chunk-`PUT`s, danach `MOVE /remote.php/dav/uploads/<user>/<upload-id>/.file` zum Zielpfad
+
+Secrets (optionale separate Passwortzustellung):
+
+- Verschlüsseltes Secret erstellen: `POST /ocs/v2.php/apps/secrets/api/v1/secrets`
+- Öffentlicher Einmal-Link: `/index.php/apps/secrets/share/<uuid>#<local-key>`
+- Der Schlüssel bleibt im URL-Fragment und wird nicht an Nextcloud übertragen.
+
+IFB (DAV über lokalen Proxy):
+
+- Reservierter Listener-Namespace: `http://127.0.0.1:<ifb-port>/nc-ifb/` (Standardport `7777`)
+- Akzeptierter Outlook-Pfad: `/nc-ifb/<request-secret>/freebusy/<address>.vfb`; das Secret wird für jeden Outlook-Prozess erzeugt und nicht persistiert. Der DPAPI-geschützte Profilzustand enthält nur den Registry-Besitzstand
+- Anfragen ohne Request-Secret erhalten `404`
+- Der Proxy greift auf CalDAV- und Adressbuch-Endpunkte unter `remote.php/dav/...` zu.
+
+Updateprüfung:
+
+- Homepage-Endpunkt: `GET https://nc-connector.de/wp-json/ncc/v1/update-check`
+- Query-Werte: `product=outlook`, installierte Version, Kanal und täglich wechselnder Client-Hash
+- Release- und Download-Ziele aus der Antwort bleiben nur erhalten, wenn sie HTTPS unter `github.com/nc-connector/NC_Connector_for_Outlook/releases/` verwenden. Andere Werte werden verworfen.
+- `UpdateAvailable` wird lokal aus installierter und gemeldeter Version berechnet.
+- Die Homepage liefert nur Release-Metadaten und zählt einen anonymen Client pro Tag.
+
+## Lokalisierung (i18n)
+
+- Übersetzungen liegen unter `src/NcTalkOutlookAddIn/Resources/_locales/<sprache>/messages.json`.
+- `src/NcTalkOutlookAddIn/Utilities/Strings.cs` lädt die aktive Sprache und formatiert Platzhalter.
+- Die Standardsprache ist Deutsch (`de`). Die Outlook-/Office-Oberflächensprache hat Vorrang; nicht unterstützte Sprachen fallen auf Deutsch und danach Englisch zurück.
+- Sprachabhängige Links müssen auf die passende deutsche oder englische Anleitung zeigen.
+
+Die vollständige Sprachliste und der Pflegeablauf stehen in `Translations.md`.
+
+## Logging
+
+- Aktivierung: **Einstellungen -> Debuggen -> Debug-Logdatei schreiben**
+- Option (Standard aktiv): **Logs anonymisieren**
+- Tägliche Datei: `%LOCALAPPDATA%\NC4OL\addin-runtime.log_YYYYMMDD`
+- Runtime-Exceptions laufen über `DiagnosticsLogger.LogException(...)` und werden auch bei deaktiviertem Debug-Logging geschrieben.
+- Aufbewahrung: die letzten sieben Tageslogs behalten und Dateien, die älter als 30 Tage sind, nach Möglichkeit entfernen.
+- Authorization-Werte, URL-Zugangsdaten, strukturierte Token-/Passwortfelder, Talk-/Share-Pfadtoken und Secret-Fragmente werden vor jedem Schreiben maskiert, auch wenn die optionale Anonymisierung aus ist.
+- Die Anonymisierung maskiert zusätzlich Nextcloud-URL/Basis-Host, Benutzerkennungen, E-Mail-Adressen und lokale Benutzerpfade.
+
+Kategorien:
+
+- `CORE`: Start, Einstellungen und Registry
+- `API`: HTTP-Aufrufe und Statuscodes
+- `TALK`: Raum-Lebenszyklus, Lobby und Delegation
+- `FILELINK`: Upload, Freigabe, Bereinigung und Passwort-Follow-up
+- `IFB`: Anfragen, Cache und Outlook-Registry
+
+FileLink-Uploadpfade protokollieren Uploadplan, Wiederholungen, periodischen Gesamtfortschritt und Abschlusszusammenfassung, aber nicht jeden erfolgreichen Datei-Request.
+
+## Kompatibilität und Versionsprüfungen
+
+### Outlook-Bitness
+
+Outlook kann als 32-Bit-Anwendung auf einem 64-Bit-Windows installiert sein. Das MSI registriert das COM-Add-in deshalb in beiden Registry-Ansichten:
+
+- 64-Bit: `HKLM\Software\Microsoft\Office\Outlook\Addins\NcTalkOutlook.AddIn`
+- 32-Bit: `HKLM\Software\Wow6432Node\Microsoft\Office\Outlook\Addins\NcTalkOutlook.AddIn`
+
+Die Definition liegt in `installer/Product.wxs`.
+
+### Nextcloud-Funktionserkennung
+
+Alle Add-in-Funktionen setzen Nextcloud 32 oder neuer voraus. `NextcloudCapabilitiesService` liest die authentifizierte OCS-Capabilities-Antwort, prüft die strukturierte Versionsnummer und speichert den typisierten Snapshot fünf Minuten pro Server-/Benutzerkombination zwischen. Antworten ohne auswertbare Version und ältere Server werden abgelehnt.
+
+Die DAV-Bulk-Funktion wird nur bei exakt gemeldetem `ocs.data.capabilities.dav.bulkupload = "1.0"` und einem Uploadplan mit ausreichender Request-Einsparung verwendet. Ohne diese Voraussetzungen bleiben Direct- und Chunked-Upload verfügbar.
+
+### WinForms-Theme
+
+`Utilities/UiThemeManager.cs` liest nach Möglichkeit das Office-/Outlook-Theme und fällt danach auf das Windows-App-Theme zurück. Im Hochkontrastmodus gelten die Systemfarben.
+
+## Build und Release
+
+### Was `build.ps1` macht
+
+1. COM-Add-in (`NcTalkOutlookAddIn.sln`) mit MSBuild bauen
+2. Assembly-Version aus `NcTalkOutlookAddIn.dll` lesen
+3. WiX-v6-Installer (`installer/NcConnectorOutlookInstaller.wixproj`) bauen
+4. MSI nach `dist/` kopieren
+
+### Versionierung
 
 - `src/NcTalkOutlookAddIn/Properties/AssemblyInfo.cs`
   - `AssemblyVersion`
@@ -337,14 +442,14 @@ Installer:
 
 `build.ps1` leitet daraus die MSI `ProductVersion` ab (Format `Major.Minor.Build`).
 
-### MSI Upgrade-Kompatibilität
+**MSI-Upgrade-Kompatibilität**
 
 Wichtig für Updates:
 
 - UpgradeCode bleibt stabil (siehe `installer/Product.wxs`)
 - COM GUID / ProgId bleiben stabil (siehe `NextcloudTalkAddIn.cs`)
 
-### Release Checklist
+### Release-Checkliste
 
 1) Version bump
 2) Bei geaenderten vendorten Abhaengigkeiten: `VENDOR.md` aktualisieren
@@ -352,3 +457,78 @@ Wichtig für Updates:
 4) MSI installieren/upgrade testen (alte Version → neue Version)
 5) Talk + Filelink + IFB Smoke-Test
 6) MSI ggf. signieren (falls in der Umgebung erforderlich)
+
+## Lokales Testen
+
+Die automatisierten Prüfungen unter `tools/ci/` laufen über die Jobs in `.github/workflows/outlook-build-checks.yml`. Outlook-COM-Verhalten wird anschließend in Outlook geprüft.
+
+Vorgeschlagener Ablauf:
+
+1. Debug-Logging in den Einstellungen aktivieren.
+2. Kalender: Neuen Termin erstellen, einen Talk-Link einfügen, speichern, Startzeit ändern und erneut speichern.
+3. Kalender: Outlook neu starten, denselben Termin öffnen, die Startzeit ändern und erneut speichern.
+4. Kalender: Teilnehmer hinzufügen und erneut speichern.
+5. Kalender: Die Raumlöschung gespeicherter Termine aktivieren und gespeicherte Talk-Termine einmal aus dem geöffneten Termin und einmal aus der Kalenderansicht löschen. Prüfen, dass der jeweilige Raum entfernt wird. Den Test einmal mit einem vorübergehenden Nextcloud-Fehler wiederholen, Outlook neu starten und den vorgemerkten Retry prüfen.
+6. Mail: Freigabe-Wizard ausführen, ein oder zwei kleine Dateien hochladen, den Freigabeblock einfügen und an das eigene Konto senden.
+7. Mail: Eine Freigabe einfügen und die Nachricht vor dem Speichern verwerfen; prüfen, dass der exakte Serverordner entfernt wird. Mit Speichern oder AutoSave wiederholen und prüfen, dass die Freigabe bestehen bleibt.
+8. Mail: Bei separater Passwortzustellung die Freigabe erstellen und im selben Verfassen-Fenster auf **Senden** klicken. Prüfen, dass der fertige Follow-up sofort über dasselbe wirksame Outlook-Konto abgeht und kein NC-Connector-Passwortentwurf verbleibt. Mit verzögerter/Offline-Übermittlung wiederholen und die dokumentierte direkte Grenze prüfen: Der Follow-up wartet nicht auf die Hauptmail im Postausgang. Ein geschlossener und erneut geöffneter Hauptentwurf oder eine `.oft`-Vorlage mit vorhandenem Freigabeblock liegt außerhalb des unterstützten Ablaufs und benötigt vor dem Versand eine neue Freigabe.
+9. IFB: IFB aktivieren, URL-Reservierung und TCP-Listener prüfen und danach im Outlook-Terminplanungs-Assistenten eine Adresse verwenden, deren Domain vom konfigurierten Nextcloud-Login und -Host abweicht. Eine direkte Anfrage ohne Request-Secret muss `404` liefern.
+10. **Einstellungen -> Erweitert -> Jetzt prüfen** ausführen und kontrollieren, dass aktuelle Version, letzte Prüfung, Download-Link und Änderungsübersicht ohne blockierte Outlook-Oberfläche aktualisiert werden.
+
+## Referenz der X-NCTALK-*-Eigenschaften
+
+Das Add-in speichert Talk-Terminmetadaten ausschließlich als Outlook-`UserProperties` mit `X-NCTALK-*`-Namen. Frühere NC-Connector-spezifische Outlook-Eigenschaften werden nicht mehr gelesen oder geschrieben.
+
+Sofern nicht anders angegeben:
+
+- Die Werte sind Text (`OlUserPropertyType.olText`).
+- Boolean-Werte werden als `TRUE` oder `FALSE` gespeichert.
+- Zeitstempel sind Unix-Epoch-Sekunden in UTC und invariantem Zahlenformat.
+
+Die primären Schreibpfade liegen in `TalkAppointmentController.ApplyRoomToAppointment(...)` und `TalkAppointmentController.PersistCoreIcalProperties(...)`.
+
+### Eigenschaften
+
+| Eigenschaft | Zweck | Format | Verwendung |
+| --- | --- | --- | --- |
+| `X-NCTALK-TOKEN` | Talk-Raumtoken | Text | Voraussetzung für Subscription, Retry und optionale Raumlöschung; beliebige Talk-URLs sind keine Löschquelle. |
+| `X-NCTALK-URL` | Talk-Raum-URL | Absolute URL | Lokale Outlook-Metadaten, nicht als Löschquelle verwendet. |
+| `X-NCTALK-LOBBY` | Lobby aktiv | `TRUE` / `FALSE` | Steuert Lobby-Aktualisierungen beim Speichern. |
+| `X-NCTALK-START` | Terminstart | Unix-Sekunden | Laufzeit- und Lobby-Zustand. |
+| `X-NCTALK-EVENT` | Raummodus | `event` / `standard` | Unterscheidet Ereignis- und Gruppenraum. |
+| `X-NCTALK-OBJECTID` | Zeitfenster | `<start>#<end>` | Lokale Terminmetadaten. |
+| `X-NCTALK-ADD-USERS` | Interne Teilnehmer synchronisieren | `TRUE` / `FALSE` | Getrennter Schalter für Nextcloud-Benutzer. |
+| `X-NCTALK-ADD-GUESTS` | Externe Teilnehmer synchronisieren | `TRUE` / `FALSE` | Getrennter Schalter für Gäste. |
+| `X-NCTALK-DELEGATE` | Ziel der Moderatorübergabe | Benutzer-ID | Erkennung und Wiederholung ausstehender Übergaben. |
+| `X-NCTALK-DELEGATE-NAME` | Anzeigename des Ziels | Text | Lokale Anzeigeinformation. |
+| `X-NCTALK-DELEGATED` | Status der Übergabe | `TRUE` / `FALSE` | Markiert eine noch ausstehende oder abgeschlossene Übergabe. |
+| `X-NCTALK-DELEGATE-READY` | Bereitschaftsmarker | `TRUE` | Bestandteil des Outlook-Delegationsablaufs. |
+
+## Erweiterungspunkte
+
+### Neue Einstellung ergänzen
+
+1. Eigenschaft in `Settings/AddinSettings.cs` anlegen.
+2. Lesen und Schreiben in `Settings/SettingsStorage.cs` ergänzen.
+3. Oberfläche in `UI/SettingsForm.cs` erweitern.
+4. Den Schlüssel in allen Dateien unter `Resources/_locales/` ergänzen.
+5. Persistenz-, Locale- und UI-Tests anpassen.
+
+### Neuen Nextcloud-API-Aufruf ergänzen
+
+1. Den zuständigen Service erweitern:
+   - Talk: `Services/TalkService.cs`
+   - FileLink-Orchestrierung: `Services/FileLinkService.cs`
+   - DAV: `Services/FileLinkDavClient.cs`
+   - Transfers: `Services/FileLinkTransferService.cs`
+   - OCS-Freigabe: `Services/FileLinkShareClient.cs`
+2. Für OCS/JSON den gemeinsamen `NcHttpClient` und `NcJson` verwenden.
+3. Bei Bedarf ein Request-/Response-Modell unter `Models/` anlegen.
+4. Operationslogging, Fehlerabbildung und Tests ergänzen.
+5. Ribbon-Abläufe über den zuständigen Controller verdrahten; `NextcloudTalkAddIn.cs` bleibt Composition Root.
+
+### Neue Übersetzung ergänzen
+
+1. Zugriffseigenschaft in `Utilities/Strings.cs` anlegen.
+2. Den Schlüssel in jeder `Resources/_locales/<sprache>/messages.json` ergänzen.
+3. Locale- und Nutzungsprüfungen ausführen und die Oberfläche kontrollieren.

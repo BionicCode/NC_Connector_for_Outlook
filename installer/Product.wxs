@@ -32,6 +32,7 @@
           <File Id="filSystemBuffersDll" Source="$(var.BuildOutputDir)System.Buffers.dll" />
           <File Id="filSystemCollectionsImmutableDll" Source="$(var.BuildOutputDir)System.Collections.Immutable.dll" />
           <File Id="filSystemMemoryDll" Source="$(var.BuildOutputDir)System.Memory.dll" />
+          <File Id="filSystemNumericsVectorsDll" Source="$(var.BuildOutputDir)System.Numerics.Vectors.dll" />
           <File Id="filSystemUnsafeDll" Source="$(var.BuildOutputDir)System.Runtime.CompilerServices.Unsafe.dll" />
           <File Id="filSystemCodePagesDll" Source="$(var.BuildOutputDir)System.Text.Encoding.CodePages.dll" />
           <File Id="filLicenseTxt" Source="$(var.BuildOutputDir)LICENSE.txt" />

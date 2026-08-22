@@ -47,11 +47,40 @@ namespace NcTalkOutlookAddIn
 
         private void EnsureSubscriptionForAppointment(Outlook.AppointmentItem appointment)
         {
-            EnsureSubscriptionForAppointment(appointment, true);
+            bool retainsAppointmentReference;
+            EnsureSubscriptionForAppointmentCore(
+                appointment,
+                true,
+                out retainsAppointmentReference);
         }
 
         private void EnsureSubscriptionForAppointment(Outlook.AppointmentItem appointment, bool allowDeferredRetry)
         {
+            bool retainsAppointmentReference;
+            EnsureSubscriptionForAppointmentCore(
+                appointment,
+                allowDeferredRetry,
+                out retainsAppointmentReference);
+        }
+
+        private void EnsureSubscriptionForSelectedAppointment(
+            Outlook.AppointmentItem appointment,
+            out bool retainsAppointmentReference)
+        {
+            // A newly created or deferred subscription owns the RCW supplied by Selection.
+            // Existing subscriptions and non-Talk items do not need that additional reference.
+            EnsureSubscriptionForAppointmentCore(
+                appointment,
+                true,
+                out retainsAppointmentReference);
+        }
+
+        private void EnsureSubscriptionForAppointmentCore(
+            Outlook.AppointmentItem appointment,
+            bool allowDeferredRetry,
+            out bool retainsAppointmentReference)
+        {
+            retainsAppointmentReference = false;
             if (appointment == null)
             {
                 return;
@@ -101,6 +130,7 @@ namespace NcTalkOutlookAddIn
                     out isEventConversation);
 
                 RegisterSubscription(appointment, roomToken, lobbyEnabled, isEventConversation);
+                retainsAppointmentReference = true;
             }
             catch (COMException ex)
             {
@@ -108,7 +138,10 @@ namespace NcTalkOutlookAddIn
                 {
                     if (allowDeferredRetry)
                     {
-                        QueueDeferredAppointmentSubscriptionEnsure(appointment, ex);
+                        retainsAppointmentReference =
+                            QueueDeferredAppointmentSubscriptionEnsure(
+                                appointment,
+                                ex);
                         return;
                     }
 
@@ -129,6 +162,7 @@ namespace NcTalkOutlookAddIn
 
         private bool QueueDeferredAppointmentSubscriptionEnsure(Outlook.AppointmentItem appointment, COMException triggerException)
         {
+            // True means the posted callback captures this exact Appointment RCW.
             if (appointment == null)
             {
                 return false;
@@ -165,7 +199,7 @@ namespace NcTalkOutlookAddIn
             }
             if (!_deferredAppointmentEnsureState.TryQueuePendingKey(ensureKey))
             {
-                return true;
+                return false;
             }
 
             LogDeferredAppointmentEnsureRestriction(

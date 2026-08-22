@@ -19,11 +19,17 @@ $sourceFiles = Get-ChildItem -Path $SourceRoot -Recurse -Filter "*.cs" |
 
 foreach ($file in $sourceFiles) {
     $text = Get-Content -Raw -Path $file.FullName
-    foreach ($match in [regex]::Matches($text, '\bGet\s*\(\s*"(?<key>[a-zA-Z0-9_]+)"\s*,')) {
-        [void]$usedKeys.Add($match.Groups["key"].Value)
+    if ($file.Name -eq "Strings.cs") {
+        foreach ($match in [regex]::Matches($text, '\bGet\s*\(\s*(?<keyExpression>[^,]+),')) {
+            foreach ($literal in [regex]::Matches($match.Groups["keyExpression"].Value, '"(?<key>[a-zA-Z0-9_]+)"')) {
+                [void]$usedKeys.Add($literal.Groups["key"].Value)
+            }
+        }
     }
-    foreach ($match in [regex]::Matches($text, '\bGetInLanguage\s*\([^,]+,\s*"(?<key>[a-zA-Z0-9_]+)"\s*,')) {
-        [void]$usedKeys.Add($match.Groups["key"].Value)
+    foreach ($match in [regex]::Matches($text, '\bGetInLanguage\s*\([^,]+,\s*(?<keyExpression>[^,]+),')) {
+        foreach ($literal in [regex]::Matches($match.Groups["keyExpression"].Value, '"(?<key>[a-zA-Z0-9_]+)"')) {
+            [void]$usedKeys.Add($literal.Groups["key"].Value)
+        }
     }
 }
 
@@ -33,10 +39,15 @@ foreach ($key in $usedKeys) {
         $failures.Add("Code uses locale key '$key', but en/messages.json does not define it.")
     }
 }
+foreach ($key in $englishKeys) {
+    if (-not $usedKeys.Contains($key)) {
+        $failures.Add("en/messages.json defines locale key '$key', but the code does not use it.")
+    }
+}
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ }
     throw "Locale usage check failed with $($failures.Count) issue(s)."
 }
 
-Write-Host "Locale usage OK: $($usedKeys.Count) code-used key(s) exist in en/messages.json."
+Write-Host "Locale usage OK: $($usedKeys.Count) code-used key(s) match en/messages.json exactly."

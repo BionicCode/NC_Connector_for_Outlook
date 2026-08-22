@@ -2,8 +2,6 @@
 // Licensed under the GNU Affero General Public License v3.0.
 // See LICENSE.txt for details.
 
-using System;
-using System.Collections.Generic;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Utilities;
 
@@ -16,6 +14,7 @@ namespace NcTalkOutlookAddIn.Settings
         internal const int MinIfbPort = 1024;
         internal const int MaxIfbPort = 49151;
         internal const string DefaultFileLinkBasePath = "NC Connector";
+        internal const int DefaultSharingAttachmentsOfferAboveMb = 20;
 
         public AddinSettings()
         {
@@ -28,6 +27,7 @@ namespace NcTalkOutlookAddIn.Settings
             IfbCacheHours = 24;
             IfbPort = DefaultIfbPort;
             IfbPreviousFreeBusyPath = string.Empty;
+            IfbUserDecisionRecorded = false;
             DebugLoggingEnabled = false;
             LogAnonymizationEnabled = true;
             TransportTlsUseSystemDefault = false;
@@ -55,7 +55,7 @@ namespace NcTalkOutlookAddIn.Settings
             SharingDefaultExpireDays = 7;
             SharingAttachmentsAlwaysConnector = false;
             SharingAttachmentsOfferAboveEnabled = true;
-            SharingAttachmentsOfferAboveMb = 20;
+            SharingAttachmentsOfferAboveMb = DefaultSharingAttachmentsOfferAboveMb;
             SharingAttachmentLinkTarget = null;
             ShareBlockLang = "default";
             EventDescriptionLang = "default";
@@ -91,6 +91,8 @@ namespace NcTalkOutlookAddIn.Settings
         public int IfbPort { get; set; }
 
         public string IfbPreviousFreeBusyPath { get; set; }
+
+        public bool IfbUserDecisionRecorded { get; set; }
 
         public bool DebugLoggingEnabled { get; set; }
 

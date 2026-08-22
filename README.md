@@ -39,14 +39,13 @@ Key points:
 - attachment automation for large attachments or always through NC Connector, with a selectable `ZIP download` (default) or `Nextcloud share page` link target
 - one local scan builds a root-relative upload plan; the destination root is created atomically, and attachment automation tries numbered names after a collision without a preliminary server probe
 - folders are prepared once; up to three direct transfers run in parallel, files over 20 MiB use chunked upload v2, and small-file sets use DAV bulk upload only when Nextcloud advertises version `1.0` and the complete plan saves at least 20 percent of its requests
-- separate password mails are sent only after the primary mail was sent successfully
-- if auto-send fails, NC Connector opens a prepared manual password mail
+- optional separate password delivery through NC Connector Backend
 
 ## Talk
 
 An Outlook appointment can create a Nextcloud Talk room directly. The dialog supports lobby, password, room type, and moderation.
 
-NC Connector can sync appointment changes back to the room and add invited attendees. Deleting saved Talk appointments removes rooms only when this behavior is explicitly enabled.
+NC Connector can sync appointment changes back to the room and add invited attendees. When room deletion is explicitly enabled, Outlook's appointment deletion event queues the associated room for removal. Pending removals resume after an Outlook restart; startup does not scan calendars.
 
 ## Signatures
 
@@ -65,7 +64,7 @@ Updates are installed by running the new MSI over the existing installation. Per
 
 ## Requirements
 
-- Windows 10 or Windows 11
+- Windows 10 or Windows 11 (64-bit)
 - Outlook classic 2019 or newer
 - .NET Framework 4.7.2
 - Nextcloud 32 or newer

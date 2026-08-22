@@ -21,6 +21,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Web.Script.Serialization;
+using NcTalkOutlookAddIn.Controllers;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Services;
 using NcTalkOutlookAddIn.Utilities;
@@ -76,6 +78,8 @@ internal static class OutlookUtilityTests
         TestSizeFormatting();
         TestVersionParsing();
         TestCapabilitiesOcsStatus();
+        TestComposeLifecycleOriginCompatibility();
+        TestComposeShareCleanupTracker();
         TestFileLinkUploadPolicy();
         TestFileLinkPath();
         TestFileLinkSelectionScanner();
@@ -179,6 +183,119 @@ internal static class OutlookUtilityTests
         Check(
             "Nextcloud capabilities rejects empty OCS metadata",
             !NcJson.IsOcsSuccess(incomplete, out detail));
+    }
+
+    private static void TestComposeShareCleanupTracker()
+    {
+        var tracker = new ComposeShareCleanupTracker();
+        Check(
+            "Compose cleanup tracker rejects null records",
+            !tracker.Arm(null));
+        Check(
+            "Compose cleanup tracker rejects records without a folder",
+            !tracker.Arm(new ComposeShareCleanupRecord()));
+
+        ComposeShareCleanupRecord recordA =
+            CreateCleanupRecord(
+                "account-a",
+                "shares/record-a",
+                "share-a");
+        Check(
+            "Compose cleanup tracker arms record A",
+            tracker.Arm(recordA));
+        Equal(
+            "Compose cleanup tracker counts record A",
+            1,
+            tracker.Count);
+        Check(
+            "Compose cleanup tracker rejects duplicate record A",
+            !tracker.Arm(
+                CreateCleanupRecord(
+                    "ACCOUNT-A",
+                    "SHARES/RECORD-A",
+                    "share-a")));
+
+        Equal(
+            "Compose cleanup tracker releases record A after write",
+            1,
+            tracker.ReleaseAll());
+        Equal(
+            "Compose cleanup tracker is empty after ReleaseAll",
+            0,
+            tracker.Count);
+
+        ComposeShareCleanupRecord recordB =
+            CreateCleanupRecord(
+                "account-a",
+                "shares/record-b",
+                "share-b");
+        Check(
+            "Compose cleanup tracker arms record B after ReleaseAll",
+            tracker.Arm(recordB));
+        List<ComposeShareCleanupRecord> drained = tracker.Drain();
+        Equal(
+            "Compose cleanup tracker drains only record B",
+            1,
+            drained.Count);
+        Check(
+            "Compose cleanup tracker preserves drained record B",
+            drained.Count == 1
+                && object.ReferenceEquals(recordB, drained[0]));
+        Equal(
+            "Compose cleanup tracker is empty after Drain",
+            0,
+            tracker.Count);
+        Equal(
+            "Compose cleanup tracker drains an empty generation once",
+            0,
+            tracker.Drain().Count);
+    }
+
+    private static void TestComposeLifecycleOriginCompatibility()
+    {
+        var serializer = new JavaScriptSerializer();
+        ComposeLifecycleOrigin origin =
+            serializer.Deserialize<ComposeLifecycleOrigin>(
+                "{\"ServerUrl\":\"https://cloud.example.test\","
+                + "\"Username\":\"alice\","
+                + "\"AppPassword\":\"secret\","
+                + "\"CanonicalUserId\":\"legacy-alice\","
+                + "\"AccountFingerprint\":\"legacy-fingerprint\"}");
+        Check(
+            "Compose origin accepts legacy canonical-user payloads",
+            origin != null && origin.IsComplete());
+        Equal(
+            "Compose origin keeps the legacy account fingerprint",
+            "legacy-fingerprint",
+            origin != null ? origin.AccountFingerprint : string.Empty);
+
+        ComposeLifecycleOrigin created =
+            ComposeLifecycleOrigin.Create(
+                new TalkServiceConfiguration(
+                    "https://cloud.example.test/",
+                    "Alice",
+                    "secret"));
+        Equal(
+            "Compose origin keeps the established account fingerprint",
+            "40f4c18aff88b77a30863281fb9f68e8d0f578b93f8ef106518191e52c5aec52",
+            created.AccountFingerprint);
+    }
+
+    private static ComposeShareCleanupRecord CreateCleanupRecord(
+        string accountFingerprint,
+        string relativeFolder,
+        string shareId)
+    {
+        return new ComposeShareCleanupRecord
+        {
+            RelativeFolder = relativeFolder,
+            ShareId = shareId,
+            ShareLabel = relativeFolder,
+            Origin = new ComposeLifecycleOrigin
+            {
+                AccountFingerprint = accountFingerprint
+            }
+        };
     }
 
     private static void TestFileLinkUploadPolicy()
@@ -397,6 +514,33 @@ internal static class OutlookUtilityTests
             FileLinkPath.BuildShareFolderName(
                 new DateTime(2026, 7, 23),
                 "share"));
+        FileLinkShareTarget target = FileLinkPath.ResolveShareTarget(
+            "NC Connector\\Team",
+            "  quarterly:review  ",
+            new DateTime(2026, 7, 23, 23, 59, 59),
+            "share");
+        Equal(
+            "FileLink share target normalizes the configured base path",
+            "NC Connector/Team",
+            target.BasePath);
+        Equal(
+            "FileLink share target sanitizes the entered name",
+            "quarterly_review",
+            target.ShareName);
+        Equal(
+            "FileLink share target keeps the wizard date",
+            "NC Connector/Team/20260723_quarterly_review",
+            target.RelativeFolderPath);
+        FileLinkShareTarget fallbackTarget =
+            FileLinkPath.ResolveShareTarget(
+                "NC Connector",
+                "   ",
+                new DateTime(2026, 7, 24),
+                "share");
+        Equal(
+            "FileLink share target applies the localized fallback",
+            "NC Connector/20260724_share",
+            fallbackTarget.RelativeFolderPath);
     }
 
     private static void TestFileLinkUploadPlanner()
@@ -900,14 +1044,19 @@ internal static class OutlookUtilityTests
     $sources = @(
         $testSource,
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Models\FileLinkSelection.cs"),
+        (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Models\ComposeLifecycleOrigin.cs"),
+        (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Models\ComposeShareCleanupRecord.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\FileLinkDuplicateInfo.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\FileLinkUploadPlan.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\FileLinkSelectionScanner.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\FileLinkUploadPlanner.cs"),
+        (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\TalkServiceConfiguration.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Services\TalkServiceException.cs"),
+        (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Controllers\ComposeShareCleanupTracker.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\PasswordGenerator.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\SizeFormatting.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\NextcloudVersionHelper.cs"),
+        (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\NextcloudUriValidator.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\FileLinkPath.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\FileLinkUploadPolicy.cs"),
         (Join-Path $ProjectRoot "src\NcTalkOutlookAddIn\Utilities\PlainTextUtilities.cs"),

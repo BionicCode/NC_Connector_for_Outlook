@@ -3,6 +3,7 @@
 // See LICENSE.txt for details.
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -26,10 +27,6 @@ namespace NcTalkOutlookAddIn.Controllers
         internal sealed class EmailSignatureReconcileResult
         {
             internal bool Success { get; set; }
-
-            internal bool Changed { get; set; }
-
-            internal bool Managed { get; set; }
 
             internal string Source { get; set; }
         }
@@ -270,18 +267,18 @@ namespace NcTalkOutlookAddIn.Controllers
             }
         }
 
-        internal void InsertHtmlIntoMail(Outlook.MailItem mail, string html)
+        internal bool InsertHtmlIntoMail(Outlook.MailItem mail, string html)
         {
             if (mail == null || string.IsNullOrWhiteSpace(html))
             {
-                return;
+                return false;
             }
             if (IsActiveInlineResponse(mail))
             {
                 if (TryInsertHtmlIntoActiveInlineResponseWordEditor(mail, html))
                 {
                     DiagnosticsLogger.Log(LogCategories.Core, "Inserted HTML block into inline response (ActiveInlineResponseWordEditor).");
-                    return;
+                    return true;
                 }
 
                 DiagnosticsLogger.Log(LogCategories.Core, "Failed to insert HTML into inline response: inline WordEditor insertion failed.");
@@ -290,18 +287,18 @@ namespace NcTalkOutlookAddIn.Controllers
                     Strings.DialogTitle,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
-                return;
+                return false;
             }
             if (TryInsertHtmlIntoInspectorWordEditor(mail, html))
             {
                 DiagnosticsLogger.Log(LogCategories.Core, "Inserted HTML block into mail (WordEditor InsertFile primary).");
-                return;
+                return true;
             }
 
             if (TryInsertHtmlIntoMailBody(mail, html))
             {
                 DiagnosticsLogger.Log(LogCategories.Core, "Inserted HTML block into mail (HTMLBody compatibility fallback).");
-                return;
+                return true;
             }
 
             DiagnosticsLogger.Log(LogCategories.Core, "Failed to insert HTML into mail: all insertion paths exhausted.");
@@ -310,13 +307,14 @@ namespace NcTalkOutlookAddIn.Controllers
                 Strings.DialogTitle,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+            return false;
         }
 
-        internal void InsertPlainTextIntoMail(Outlook.MailItem mail, string plainText)
+        internal bool InsertPlainTextIntoMail(Outlook.MailItem mail, string plainText)
         {
             if (mail == null || string.IsNullOrWhiteSpace(plainText))
             {
-                return;
+                return false;
             }
 
             try
@@ -331,7 +329,7 @@ namespace NcTalkOutlookAddIn.Controllers
                 if (TryInsertPlainTextViaWordEditor(mail, insertText, out source))
                 {
                     DiagnosticsLogger.Log(LogCategories.Core, "Inserted plain-text share block into mail (source=" + source + ").");
-                    return;
+                    return true;
                 }
 
                 throw new InvalidOperationException("Outlook WordEditor insertion point unavailable.");
@@ -344,6 +342,7 @@ namespace NcTalkOutlookAddIn.Controllers
                     Strings.DialogTitle,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+                return false;
             }
         }
 
@@ -711,8 +710,6 @@ namespace NcTalkOutlookAddIn.Controllers
                         {
                             TryDeleteEmailSignatureBookmark(bookmarks, ManagedEmailSignatureBookmarkName);
                         }
-                        result.Changed = result.Success;
-                        result.Managed = false;
                         result.Source = slotSource;
                         return result;
                     }
@@ -752,8 +749,6 @@ namespace NcTalkOutlookAddIn.Controllers
                                     ? ManagedEmailSignatureBookmarkName
                                     : OutlookAutoSignatureBookmarkName);
                         }
-                        result.Changed = result.Success;
-                        result.Managed = false;
                         result.Source = slotSource;
                         return result;
                     }
@@ -1103,8 +1098,6 @@ namespace NcTalkOutlookAddIn.Controllers
                     }
 
                     result.Success = true;
-                    result.Changed = true;
-                    result.Managed = true;
                     result.Source = hasInitialSlot ? resolvedSlotSource : "safe_" + resolvedSlotSource;
                     DiagnosticsLogger.Log(
                         LogCategories.Core,
@@ -2187,6 +2180,7 @@ namespace NcTalkOutlookAddIn.Controllers
             object content = null;
             object tailRange = null;
             object paragraphs = null;
+            var failedBorderIndexes = new HashSet<int>();
             try
             {
                 content = wordEditor.GetType().InvokeMember("Content", BindingFlags.GetProperty, null, wordEditor, null);
@@ -2255,7 +2249,9 @@ namespace NcTalkOutlookAddIn.Controllers
                             continue;
                         }
 
-                        if (ParagraphHasVisibleBorder(paragraph))
+                        if (ParagraphHasVisibleBorder(
+                            paragraph,
+                            failedBorderIndexes))
                         {
                             separatorStart = Math.Max(searchStart, paragraphStart);
                             return true;
@@ -2277,13 +2273,26 @@ namespace NcTalkOutlookAddIn.Controllers
             }
             finally
             {
+                if (DiagnosticsLogger.IsEnabled && failedBorderIndexes.Count > 0)
+                {
+                    int[] indexes = new int[failedBorderIndexes.Count];
+                    failedBorderIndexes.CopyTo(indexes);
+                    Array.Sort(indexes);
+                    DiagnosticsLogger.Log(
+                        LogCategories.Core,
+                        "Inline reply border lookup failed for indexes (indexes="
+                        + string.Join(",", Array.ConvertAll(indexes, value => value.ToString(CultureInfo.InvariantCulture)))
+                        + ").");
+                }
                 ComInteropScope.TryRelease(paragraphs, LogCategories.Core, "Failed to release inline quote separator paragraphs COM object.");
                 ComInteropScope.TryRelease(tailRange, LogCategories.Core, "Failed to release inline quote separator tail range COM object.");
                 ComInteropScope.TryRelease(content, LogCategories.Core, "Failed to release inline quote separator content COM object.");
             }
         }
 
-        private static bool ParagraphHasVisibleBorder(object paragraph)
+        private static bool ParagraphHasVisibleBorder(
+            object paragraph,
+            HashSet<int> unavailableIndexes)
         {
             if (paragraph == null)
             {
@@ -2299,9 +2308,9 @@ namespace NcTalkOutlookAddIn.Controllers
                     return false;
                 }
 
-                return BorderAtIndexIsVisible(borders, -1)
-                       || BorderAtIndexIsVisible(borders, -3)
-                       || BorderAtIndexIsVisible(borders, -5);
+                return BorderAtIndexIsVisible(borders, -1, unavailableIndexes)
+                       || BorderAtIndexIsVisible(borders, -3, unavailableIndexes)
+                       || BorderAtIndexIsVisible(borders, -5, unavailableIndexes);
             }
             catch (Exception ex)
             {
@@ -2314,7 +2323,10 @@ namespace NcTalkOutlookAddIn.Controllers
             }
         }
 
-        private static bool BorderAtIndexIsVisible(object borders, int index)
+        private static bool BorderAtIndexIsVisible(
+            object borders,
+            int index,
+            HashSet<int> failedIndexes)
         {
             object border = null;
             try
@@ -2331,17 +2343,11 @@ namespace NcTalkOutlookAddIn.Controllers
                        && int.TryParse(Convert.ToString(lineStyle, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out value)
                        && value != 0;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                if (DiagnosticsLogger.IsEnabled)
+                if (failedIndexes != null)
                 {
-                    DiagnosticsLogger.Log(
-                        LogCategories.Core,
-                        "Inline reply border lookup was unavailable (index="
-                        + index.ToString(CultureInfo.InvariantCulture)
-                        + ", errorType="
-                        + ex.GetType().Name
-                        + ").");
+                    failedIndexes.Add(index);
                 }
                 return false;
             }

@@ -61,6 +61,8 @@ Die Nextcloud-App Password Policy ist optional. Ist sie verfügbar, liest NC Con
 
 Clients benötigen HTTPS-Zugriff auf die konfigurierte öffentliche Nextcloud-Basis-URL einschließlich ihrer OCS- und WebDAV-Pfade. Ein öffentlicher Unterpfad wie `/nextcloud` bleibt Bestandteil der URL; `/index.php` darf nicht in die in NC Connector konfigurierte URL aufgenommen werden.
 
+NC Connector lehnt explizite HTTP-URLs, in URLs eingebettete Zugangsdaten sowie Basis-URLs mit Query oder Fragment ab. Dynamische Login- und Passwort-Policy-Endpunkte müssen über HTTPS auf demselben Host, Port und Schema wie die konfigurierte Nextcloud-Basis-URL liegen.
+
 Optionale ausgehende Ziele:
 
 - `https://nc-connector.de/wp-json/ncc/v1/update-check` für tägliche Release-Metadaten
@@ -127,6 +129,8 @@ Add-in-Version, Outlook-Bitness, Nextcloud-Version und das Ergebnis jedes Schrit
 
 Die MSI ersetzt eine installierte neuere, gleiche oder ältere Version. Benutzerspezifische Einstellungen bleiben im Benutzerprofil erhalten.
 
+Beim ersten Start mit aktiviertem IFB nach einem Upgrade migriert NC Connector nur seine alten Outlook-Werte im Format `/nc-ifb/freebusy/...` auf den aktuellen geschützten Pfad. Vorhandene externe Outlook-Free/Busy-Werte bleiben unverändert. Diese Migration betrifft benutzerspezifische Outlook-Werte; ein Löschen der HTTP-URL-Reservierung mit `netsh` ist dafür nicht erforderlich.
+
 Das Add-in meldet Release-Metadaten, installiert aber keine Updates. **Einstellungen -> Erweitert -> Über neue Versionen informieren** steuert das Popup; die tägliche Metadatenabfrage läuft auch bei deaktiviertem Popup. Freigabe und Verteilung der MSI bleiben Aufgaben der Administration.
 
 1. Outlook schließen.
@@ -191,6 +195,10 @@ Wenn Outlook keinen Profilnamen liefert, verwendet das Add-in:
 
 Das App-Passwort wird als `AppPasswordProtected` mit dem Windows-Datenschutz für den aktuellen Benutzer gespeichert. Es ist kein portables Zugangsmittel.
 
+Jeder erfolgreiche Speichervorgang schreibt zunächst eine validierte temporäre Datei im selben Verzeichnis und ersetzt danach die Hauptdatei. Die vorherige gültige Datei bleibt als `settings_<OutlookProfile>.xml.bak` erhalten. Ist nur das geschützte Passwort nicht lesbar, behält NC Connector die übrigen Einstellungen, leert das Passwort und blockiert automatische Settings-Schreibvorgänge, bis der Benutzer eine korrigierte Konfiguration ausdrücklich speichert.
+
+Ausstehende Talk-Raum-Löschungen und IFB-Registry-Besitzstände werden getrennt pro Outlook-Profil unter `%LOCALAPPDATA%\NC4OL\` gespeichert. Diese Zustandsdateien verwenden Windows Data Protection und behalten neben der Primärdatei eine Sicherung. Geschützte Zustände nicht in ein anderes Windows-Konto kopieren.
+
 Ältere `settings.ini`-Dateien unter diesen Verzeichnissen werden beim ersten Start migriert und erst nach erfolgreicher Migration entfernt:
 
 ```text
@@ -203,17 +211,18 @@ Das App-Passwort wird als `AppPasswordProtected` mit dem Windows-Datenschutz fü
 So wird ein Client-Profil gesichert:
 
 1. Outlook schließen.
-2. `settings_*.xml` aus `%LOCALAPPDATA%\NC4OL\` kopieren.
-3. Windows-Benutzer und Outlook-Profilnamen dokumentieren.
+2. `settings_*.xml` und `settings_*.xml.bak` aus `%LOCALAPPDATA%\NC4OL\` kopieren.
+3. Sollen ausstehende Talk-Raum-Löschungen die Sicherung überleben, zusätzlich `talk-room-lifecycle-*.dat*` und `ifb-registry-state-*.dat*` kopieren. Sie können nur für denselben Windows-Benutzer wiederhergestellt werden.
+4. Windows-Benutzer und Outlook-Profilnamen dokumentieren.
 
 So wird es wiederhergestellt:
 
 1. Outlook schließen.
-2. Die passende Profildatei für denselben Windows-Benutzer zurückspielen.
+2. Die passende Haupt- und Sicherungsdatei für denselben Windows-Benutzer zurückspielen.
 3. Outlook starten und den Verbindungstest ausführen.
 4. Bei fehlgeschlagener Authentifizierung den Nextcloud-Login-Flow erneut verwenden.
 
-Logs und der IFB-Adressbuch-Cache sind Betriebsdaten und für die Wiederherstellung der Konfiguration nicht erforderlich.
+Logs und der IFB-Adressbuch-Cache sind Betriebsdaten und für die Wiederherstellung der Konfiguration nicht erforderlich. Ohne die Talk-Lifecycle-Dateien gehen ausstehende Wiederholungen von Talk-Raum-Löschungen verloren.
 
 ### Rollout und Vorbelegung
 
@@ -449,7 +458,7 @@ Backendverwaltete Funktionen benötigen:
 Beobachtbares Verhalten je Zustand:
 
 - **Keine Backend-Konfiguration:** Freigaben, Talk und IFB verwenden lokale Einstellungen. Zentrale Signaturen und separate Passwortzustellung sind nicht verfügbar.
-- **Erreichbares Backend mit aktivem Seat:** Backend-Vorgaben gelten. Als gesperrt markierte Felder können in Outlook nicht geändert werden.
+- **Erreichbares Backend mit aktivem Seat:** Gespeicherte Outlook-Werte gelten für editierbare Felder. Gesperrte Backend-Werte überschreiben den lokalen Wert und können in Outlook nicht geändert werden.
 - **Erreichbares Backend ohne nutzbaren Seat:** Freigaben und Talk verwenden lokale Einstellungen; Outlook zeigt den Seat- oder Lizenzstatus. Zentrale Signaturen und separate Passwortzustellung sind nicht verfügbar.
 - **Backend vorübergehend nicht erreichbar:** Freigaben und Talk verwenden gespeicherte lokale Einstellungen. Eine passende Mail mit verpflichtender zentraler Signatur kann geöffnet und ungesendet bleiben, bis die Signatur-Policy wieder geprüft werden kann.
 - **Backend ohne Signatur-Domain:** Freigabe- und Talk-Policies funktionieren weiter. Zentrale Signaturen bleiben deaktiviert und Outlook zeigt einen Update-Hinweis.
@@ -464,7 +473,7 @@ Das Backend kann verwalten:
 - separate Passwortzustellung und optionale Secret-Links
 - zentrale Signaturzuweisung sowie getrennte Schalter für neue Mail, Antwort und Weiterleitung
 
-Editierbare Werte als Organisationsvorgaben verwenden. Nur Einstellungen sperren, die Benutzer nicht ändern dürfen. Vor dem breiten Rollout sowohl einen Benutzer mit aktivem Seat als auch einen Benutzer ohne Seat testen.
+Werte editierbar lassen, wenn Benutzer ihre gespeicherte Outlook-Einstellung behalten oder ändern dürfen. Nur Einstellungen sperren, die Benutzer nicht ändern dürfen. Vor dem breiten Rollout sowohl einen Benutzer mit aktivem Seat als auch einen Benutzer ohne Seat testen.
 
 ### Vorlagen erstellen
 
@@ -474,6 +483,7 @@ Für eigene Freigabevorlagen:
 - manuelle Freigaben verwenden immer den Text für die Freigabeseite
 - die Anhangsautomatisierung kann Text für ZIP-Download oder Freigabeseite verwenden
 - Vorlagen ohne diese Variablen behalten ihren vorhandenen Text
+- feste Beschriftung und Platzhalter eines optionalen Felds, etwa `{PASSWORD}`, im selben `tr`, `p`, `li` oder `div` platzieren; Outlook entfernt diesen vollständigen Block, wenn der Wert leer ist
 - absolute `https://`-Links verwenden
 
 Für HTML in Talk-Terminen:
@@ -541,23 +551,29 @@ Beide Linkziele bleiben schreibgeschützte Freigaben. Kann aus der öffentlichen
 
 Outlook oder Exchange kann einen großen Anhang ablehnen, bevor ein Add-in-Ereignis läuft. In diesem Fall müssen Benutzer **Nextcloud-Freigabe einfügen** wählen und die Datei direkt im Freigabe-Assistenten hinzufügen.
 
-### Bereinigung nach einer ungesendeten Mail
+### Ungesendete Mail und Freigabebereinigung
 
-Eine für ein Verfassen-Fenster erstellte Anhangsfreigabe wird bis zum erfolgreichen Versand der Hauptmail verfolgt.
+Nach dem Einfügen eines Freigabeblocks verfolgt NC Connector die neu erstellte Serverfreigabe, bis Outlook die Nachricht nach dieser Einfügung erfolgreich speichert. Wird das Verfassen-Fenster vor einer erfolgreichen Speicherung verworfen, entfernt NC Connector den exakten Serverordner mit dem beim Erstellen erfassten Kontokontext.
 
-- erfolgreicher Versand der Hauptmail: Bereinigungsverfolgung wird beendet und die Freigabe bleibt bestehen
-- Schließen des Fensters ohne erfolgreichen Versand: der erstellte Serverordner wird nach einer kurzen Send/Close-Wartezeit gelöscht
-- fehlgeschlagene Löschung: die Mail bleibt geschlossen, der Fehler wird unter `FILELINK` protokolliert und ein Administrator muss die verwaiste Freigabe gegebenenfalls manuell entfernen
+- Manuelles oder automatisches Speichern eines Entwurfs behält die Freigabe. Versand, „Später senden“ und Offline-Postausgang behalten sie ebenfalls.
+- Ein abgebrochener Schließvorgang oder das Verschieben einer Inline-Antwort in ein eigenes Fenster entfernt die Freigabe nicht.
+- Das spätere Löschen eines bereits von Outlook gespeicherten Entwurfs wird nicht verfolgt. Seine ungenutzte Freigabe muss manuell in Nextcloud entfernt werden.
+- Kann der Freigabeblock nicht eingefügt werden, meldet der Wizard einen Fehler und versucht sofort, den neu erzeugten Serverordner mit dem erfassten Kontokontext zu entfernen.
+- Eine erzwingende Anhangs-Policy blockiert den Versand, solange ein normaler Anhang in der Nachricht verbleibt, der über NC Connector hätte laufen müssen.
+- Die separate Passwortzustellung wird beim Klick auf **Senden** direkt übergeben, wie im folgenden Abschnitt beschrieben.
 
 ### Separate Passwortzustellung
 
 Separate Passwortzustellung benötigt NC Connector Backend und einen aktiven Seat.
 
 - Die Hauptmail enthält kein Klartextpasswort.
-- Die Follow-up-Mail startet erst, nachdem Outlook den erfolgreichen Versand der Hauptmail bestätigt hat.
-- Der automatische Versand wird mit demselben wirksamen Absender versucht.
-- Schlägt die Absenderprüfung oder der automatische Versand fehl, öffnet Outlook einen vorbereiteten Entwurf zum manuellen Senden.
+- Die separate Passwortzustellung ist an die geöffnete Verfassen-Sitzung gebunden, in der die Freigabe erstellt wurde. Der Benutzer muss in genau dieser weiterhin geöffneten Nachricht auf **Senden** klicken. Speichern und AutoSave unterbrechen den Ablauf nicht, solange das Verfassen-Fenster geöffnet bleibt.
+- Das Speichern der Hauptmail als Entwurf oder `.oft`-Vorlage mit anschließendem Schließen wird nicht unterstützt. Beim erneuten Öffnen des Entwurfs, einem Outlook-Neustart vor dem ersten Sendeversuch oder einer neuen Nachricht aus dieser Vorlage bleibt der sichtbare Freigabeblock erhalten, der Zustand für die Passwortzustellung jedoch nicht. Es wird keine Passwort-Follow-up-Mail erstellt; vor dem Versand muss in der endgültigen Nachricht eine neue Freigabe erstellt werden.
+- Beim Klick auf **Senden** wird der Passwort-Follow-up vollständig aufgebaut und sofort über dasselbe wirksame Outlook-Konto übergeben. NC Connector speichert keinen zwischenzeitlichen Passwortentwurf und wertet weder Entwürfe, Postausgang noch Gesendet-Ordner aus.
+- Diese direkte Grenze wartet nicht auf eine verzögerte oder Offline-Übermittlung der Hauptmail. Der Passwort-Follow-up kann daher bereits übergeben sein, während die Hauptmail noch im Postausgang liegt oder nach dem NC-Connector-Send-Callback von Outlook abgelehnt wird.
+- Schlägt die Absenderprüfung oder automatische Übergabe eindeutig fehl, öffnet Outlook eine vollständig vorbereitete Nachricht zum manuellen Senden. Bei einem mehrdeutigen Outlook-Übermittlungsstatus wird kein automatisches Duplikat erzeugt.
 - Im Secrets-Modus wird für jeden endgültigen Empfänger ein eigener einmaliger Secret-Link erstellt.
+- Gleiche SMTP-Adressen in An, Cc und Bcc erhalten nur einen Secret-Follow-up.
 - Schlägt die Secrets-Erstellung fehl, verwendet Outlook die Klartext-Passwort-Follow-up-Mail und zeigt eine Warnung.
 - Eine passende Backend-Signatur wird nur eingefügt, wenn auch der Follow-up-Absender mit der zugewiesenen Signaturadresse übereinstimmt.
 
@@ -565,13 +581,20 @@ Separate Passwortzustellung benötigt NC Connector Backend und einen aktiven Sea
 
 Das Löschen eines gespeicherten Outlook-Termins entfernt den zugehörigen entfernten Talk-Raum nur, wenn die Einstellung ausdrücklich aktiviert ist und der Termin NC Connector-Raummetadaten enthält. Die Einstellung ist standardmäßig deaktiviert. Ein in Ort oder Nachrichtentext kopierter Talk-Link reicht für eine entfernte Löschung nicht aus.
 
-Die Bereinigung eines neu erstellten Raums aus einem ungespeicherten und verworfenen Termin bleibt aktiv.
+Das Löschen eines einzelnen Vorkommens oder einer Ausnahme einer Terminserie entfernt den gemeinsamen Raum nicht. Nur ein Nicht-Serientermin oder der Serienmaster kann die Raumlöschung vormerken.
+
+NC Connector reagiert ausschließlich auf Outlook-Ereignisse des jeweiligen Talk-Termins. Das Öffnen oder Auswählen eines Talk-Termins bindet genau diesen Termin an das Löschereignis; das gilt auch für die nach einem Outlook-Neustart wiederhergestellte aktuelle Kalenderauswahl. Damit verwenden das Löschen aus dem geöffneten Termin und aus der Kalenderansicht dieselben Prüfungen und dieselbe Queue. Beim Outlook-Start werden weder Stores oder Kalenderordner aufgezählt noch Kalenderelemente durchsucht.
+
+Vorgemerkte Raumlöschungen werden pro Outlook-Profil gespeichert und nach vorübergehenden Nextcloud-Fehlern oder einem Outlook-Neustart im Hintergrund wiederholt. Die Bereinigung eines neu erstellten Raums aus einem ungespeicherten und verworfenen Termin bleibt aktiv.
+
+Die Moderatorübergabe lehnt den aktuellen Nextcloud-Benutzer ab, wenn die Wizard-Eingabe zur kanonischen Benutzer-ID, zum konfigurierten Login oder zur bekannten primären E-Mail-Adresse passt. Nach erfolgreicher Übergabe an eine andere Person verlässt der ursprüngliche Moderator den Raum weiterhin.
 
 Vor der organisationsweiten Aktivierung der Raumlöschung für gespeicherte Termine:
 
-1. Die Löschung von jedem durch das Pilotkonto verwendeten Gerätetyp testen.
-2. Bestätigen, dass das Löschen eines synchronisierten Termins den gemeinsamen Raum für alle Geräte entfernen soll.
-3. Wiederherstellung oder Neuerstellung eines Raums für Benutzer dokumentieren.
+1. Mit einem Pilotkonto einen Talk-Termin erstellen und speichern.
+2. Outlook neu starten und den weiterhin ungeöffneten Termin direkt aus der Kalenderansicht löschen.
+3. Prüfen, dass der entfernte Raum gelöscht wird.
+4. Den Test mit dem Löschen aus dem geöffneten Termin wiederholen und Wiederherstellung oder Neuerstellung eines Raums für Benutzer dokumentieren.
 
 ## Internet Free/Busy Gateway (IFB)
 
@@ -584,13 +607,15 @@ IFB lässt Outlook Nextcloud-Free/Busy-Daten über einen lokalen HTTP-Endpunkt a
 3. IFB aktivieren und Anzahl der Tage, Cache-Dauer und lokalen Port wählen. Vorgaben sind 30 Tage, 24 Cache-Stunden und Port `7777`.
 4. Speichern und Outlook neu starten.
 
-Standard-Listener:
+Reservierter Listener-Namespace:
 
 ```text
 http://127.0.0.1:7777/nc-ifb/
 ```
 
-Die MSI reserviert den Standard-URL-Namespace für authentifizierte Windows-Benutzer. Beim Aktivieren von IFB wird der benutzerspezifische Outlook-Free/Busy-Pfad aktualisiert. Beim Deaktivieren wird der zuvor gespeicherte Pfad wiederhergestellt.
+Die MSI reserviert den Standard-URL-Namespace für authentifizierte Windows-Benutzer. NC Connector ergänzt die Outlook-Free/Busy-URL um ein zufälliges Pfadsegment; Anfragen ohne dieses Segment erhalten `404`. Der geheime Pfad wird intern verwaltet und in dieser Anleitung bewusst nicht angezeigt.
+
+Beim Aktivieren von IFB werden nur benutzerspezifische Outlook-Free/Busy-Werte aktualisiert. Vorhandene Werte und Typen werden getrennt erfasst. Beim Deaktivieren stellt NC Connector einen Wert nur wieder her, solange er noch den von NC Connector geschriebenen Inhalt hat; spätere Änderungen durch Administratoren oder andere Anwendungen bleiben unangetastet. Werte unter `Software\Policies` werden nur auf Konflikte geprüft und nie geschrieben. Der Adressbuch-Cache ist nach Outlook-Profil, vollständiger Nextcloud-Basis-URL einschließlich Unterpfad und kanonischer Nextcloud-Benutzer-ID getrennt.
 
 Der Listener läuft nur, solange Outlook läuft, IFB aktiviert ist und die gespeicherten Nextcloud-Zugangsdaten vollständig sind.
 
@@ -599,11 +624,9 @@ Der Listener läuft nur, solange Outlook läuft, IFB aktiviert ist und die gespe
 ```powershell
 netsh http show urlacl | Select-String -Pattern "127.0.0.1:7777/nc-ifb"
 Test-NetConnection 127.0.0.1 -Port 7777
-$ifbAddress = [Uri]::EscapeDataString("pilot@example.com")
-Invoke-WebRequest "http://127.0.0.1:7777/nc-ifb/freebusy/${ifbAddress}.vfb" -UseBasicParsing
 ```
 
-Eine Adresse verwenden, die im Nextcloud-Systemadressbuch vorhanden ist. Erwartetes Ergebnis: Die Reservierung ist vorhanden, der TCP-Test ist erfolgreich und die Free/Busy-Abfrage liefert Kalenderdaten oder `204 No Content`.
+Danach in Outlook einen Testtermin erstellen, eine Adresse aus dem Nextcloud-Systemadressbuch hinzufügen und den **Terminplanungs-Assistenten** öffnen. Erwartetes Ergebnis: Die Reservierung ist vorhanden, der TCP-Test ist erfolgreich und Outlook zeigt Free/Busy-Daten. Eine direkte Anfrage an den öffentlichen Pfad `/nc-ifb/freebusy/...` muss `404` liefern.
 
 ### Eigener IFB-Port
 
@@ -760,6 +783,16 @@ Eine blockierte abschließende Signaturprüfung nicht durch Kopieren unbekannten
 3. Die erzeugte Adressbuch-URL für den betroffenen Benutzer testen.
 4. Outlook neu starten und den Verbindungstest ausführen.
 
+### Einstellungen können nicht geladen oder gespeichert werden
+
+1. Outlook schließen und `settings_*.xml` sowie `settings_*.xml.bak` aus `%LOCALAPPDATA%\NC4OL\` in ein Supportverzeichnis kopieren.
+2. Outlook starten und prüfen, ob die Werte aus der Sicherung wiederhergestellt wurden.
+3. Ist nur das App-Passwort leer, erneut anmelden; die anderen lesbaren Einstellungen bleiben erhalten.
+4. Sind beide Dateien ungültig, Einstellungen neu eintragen und ausdrücklich **Speichern** wählen. Hintergrundschreibvorgänge bleiben gesperrt, bis dieses Speichern erfolgreich war.
+5. Schlägt das Speichern fehl, freien Speicherplatz, Zugriffsrechte, Endpoint-Security-Blockaden und die `CORE`-Logeinträge prüfen. Der Dialog bleibt geöffnet und die aktive Laufzeitkonfiguration wird nicht ersetzt.
+
+Erwartetes Ergebnis: Ein erfolgreiches ausdrückliches Speichern erzeugt eine gültige Primärdatei und bewahrt die vorherige gültige Version als `.bak`.
+
 ### IFB antwortet nicht
 
 1. Prüfen, ob IFB aktiviert ist und die Zugangsdaten vollständig sind.
@@ -772,7 +805,7 @@ netstat -ano | Select-String ":<ifb-port>"
 ```
 
 5. `Test-NetConnection 127.0.0.1 -Port <ifb-port>` ausführen.
-6. `http://127.0.0.1:<ifb-port>/nc-ifb/freebusy/<bekannte-adresse>.vfb` mit einer Adresse aus dem Nextcloud-Systemadressbuch abrufen.
-7. `IFB`-Logeinträge prüfen.
+6. Einen Testtermin erstellen, eine bekannte Adresse aus dem Nextcloud-Systemadressbuch hinzufügen und den **Terminplanungs-Assistenten** öffnen.
+7. `IFB`-Logeinträge für die Outlook-Anfrage und das CalDAV-Ergebnis prüfen. `404` bei einer direkten Anfrage ohne intern verwaltetes Pfadsegment ist zu erwarten.
 
 Hat eine eigene Reservierung den falschen Principal, diese löschen und mit `D:(A;;GX;;;AU)` neu erstellen.

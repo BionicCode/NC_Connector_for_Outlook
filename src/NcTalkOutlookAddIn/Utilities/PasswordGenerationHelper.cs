@@ -5,7 +5,6 @@
 using System;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Services;
-using NcTalkOutlookAddIn.Settings;
 
 namespace NcTalkOutlookAddIn.Utilities
 {

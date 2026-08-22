@@ -109,6 +109,11 @@ namespace NcTalkOutlookAddIn.Utilities
 
 namespace NcTalkOutlookAddIn.Services
 {
+    internal static class FileLinkUploadProgress
+    {
+        internal const int ReportIntervalMs = 100;
+    }
+
     internal sealed class TalkServiceException : Exception
     {
         internal TalkServiceException(
@@ -299,6 +304,7 @@ internal static class FileLinkTransferTests
         try
         {
             TestDirectRequest(tempRoot);
+            TestBulkChecksumProgress(tempRoot);
             TestBulkRetryRewritesSameBody(tempRoot);
             TestBulkPerPathFailure(tempRoot);
             TestChunkRequestSequence(tempRoot);
@@ -378,6 +384,62 @@ internal static class FileLinkTransferTests
         Check(
             "Direct upload writes the exact source body",
             content.SequenceEqual(sentBody));
+    }
+
+    private static void TestBulkChecksumProgress(string tempRoot)
+    {
+        FileLinkPlannedFile first = CreateFile(
+            tempRoot,
+            "checksum-one.bin",
+            "bulk/checksum-one.bin",
+            new byte[] { 1, 2, 3 });
+        FileLinkPlannedFile second = CreateFile(
+            tempRoot,
+            "checksum-two.bin",
+            "bulk/checksum-two.bin",
+            new byte[] { 4, 5, 6 });
+        var plan = new FileLinkUploadPlan();
+        plan.BulkFiles.Add(first);
+        plan.BulkFiles.Add(second);
+        var updates = new List<string>();
+
+        new FileLinkBulkUploader(
+            new FileLinkDavClient(options => Http(HttpStatusCode.OK)))
+            .PrepareChecksums(
+                plan,
+                (completed, total) => updates.Add(
+                    completed.ToString(CultureInfo.InvariantCulture)
+                    + "/"
+                    + total.ToString(CultureInfo.InvariantCulture)),
+                CancellationToken.None);
+
+        Equal(
+            "Bulk checksums report their initial count",
+            "0/2",
+            updates.First());
+        Equal(
+            "Bulk checksums report their final count",
+            "2/2",
+            updates.Last());
+        Check(
+            "Bulk checksum preparation calculates every MD5 value",
+            !string.IsNullOrEmpty(first.BulkChecksum)
+                && !string.IsNullOrEmpty(second.BulkChecksum));
+
+        var emptyUpdates = new List<string>();
+        new FileLinkBulkUploader(
+            new FileLinkDavClient(options => Http(HttpStatusCode.OK)))
+            .PrepareChecksums(
+                new FileLinkUploadPlan(),
+                (completed, total) => emptyUpdates.Add(
+                    completed.ToString(CultureInfo.InvariantCulture)
+                    + "/"
+                    + total.ToString(CultureInfo.InvariantCulture)),
+                CancellationToken.None);
+        Equal(
+            "Non-Bulk plans do not enter checksum progress",
+            0,
+            emptyUpdates.Count);
     }
 
     private static void TestBulkRetryRewritesSameBody(string tempRoot)

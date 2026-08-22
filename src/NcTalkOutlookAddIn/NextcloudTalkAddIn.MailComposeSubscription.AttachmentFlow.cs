@@ -6,11 +6,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using NcTalkOutlookAddIn.Controllers;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Services;
 using NcTalkOutlookAddIn.Settings;
@@ -26,7 +23,9 @@ namespace NcTalkOutlookAddIn
         {
             private void OnAttachmentAdd(Outlook.Attachment attachment)
             {
-                if (_disposed || _attachmentSuppressed)
+                if (_disposed
+                    || _attachmentSuppressed
+                    || IsHiddenAttachment(attachment))
                 {
                     return;
                 }
@@ -48,19 +47,27 @@ namespace NcTalkOutlookAddIn
 
             private void OnBeforeAttachmentAdd(Outlook.Attachment attachment, ref bool cancel)
             {
-                if (_disposed || _attachmentSuppressed)
+                if (_disposed
+                    || _attachmentSuppressed
+                    || IsHiddenAttachment(attachment))
                 {
                     return;
                 }
+                AttachmentAutomationSettings settings =
+                    ReadAttachmentAutomationSettings();
                 try
                 {
                     OutlookAttachmentAutomationGuardService.GuardState guardState;
                     if (_owner.TryGetAttachmentAutomationGuardState("before_add", _composeKey, out guardState))
                     {
+                        if (settings.AlwaysConnector)
+                        {
+                            cancel = true;
+                            ShowForcedAttachmentProcessingError();
+                        }
                         return;
                     }
 
-                    AttachmentAutomationSettings settings = ReadAttachmentAutomationSettings();
                     if (!settings.AlwaysConnector && !settings.OfferAboveEnabled)
                     {
                         LogFileLink(
@@ -79,6 +86,11 @@ namespace NcTalkOutlookAddIn
                             "Compose before-attachment-add preflight skipped (composeKey="
                             + _composeKey
                             + ", reason=candidate_unavailable).");
+                        if (settings.AlwaysConnector)
+                        {
+                            cancel = true;
+                            ShowForcedAttachmentProcessingError();
+                        }
                         return;
                     }
 
@@ -174,6 +186,11 @@ namespace NcTalkOutlookAddIn
                 }
                 catch (Exception ex)
                 {
+                    if (settings.AlwaysConnector)
+                    {
+                        cancel = true;
+                        ShowForcedAttachmentProcessingError();
+                    }
                     DiagnosticsLogger.LogException(
                         LogCategories.FileLink,
                         "Compose before-attachment-add preflight failed (composeKey=" + _composeKey + ").",
@@ -396,11 +413,87 @@ namespace NcTalkOutlookAddIn
 
             private AttachmentAutomationSettings ReadAttachmentAutomationSettings()
             {
-                // BeforeAttachmentAdd needs the decision before Outlook continues adding the file.
-                return ReadAttachmentAutomationSettingsAsync().GetAwaiter().GetResult();
+                if (_attachmentAutomationSettingsSnapshot != null)
+                {
+                    return _attachmentAutomationSettingsSnapshot;
+                }
+
+                BeginAttachmentAutomationSettingsRefresh();
+                return ReadLocalAttachmentAutomationSettings();
             }
 
             private async Task<AttachmentAutomationSettings> ReadAttachmentAutomationSettingsAsync()
+            {
+                if (_attachmentAutomationSettingsSnapshot != null
+                    && DateTime.UtcNow - _attachmentAutomationSettingsSnapshotUtc
+                    < TimeSpan.FromMinutes(5))
+                {
+                    return _attachmentAutomationSettingsSnapshot;
+                }
+
+                BeginAttachmentAutomationSettingsRefresh();
+                Task<AttachmentAutomationSettings> refreshTask =
+                    _attachmentAutomationSettingsRefreshTask;
+                if (refreshTask != null)
+                {
+                    return await refreshTask;
+                }
+                return ReadLocalAttachmentAutomationSettings();
+            }
+
+            private void BeginAttachmentAutomationSettingsRefresh()
+            {
+                if (_disposed
+                    || (_attachmentAutomationSettingsRefreshTask != null
+                        && !_attachmentAutomationSettingsRefreshTask.IsCompleted))
+                {
+                    return;
+                }
+
+                AttachmentAutomationSettings local =
+                    ReadLocalAttachmentAutomationSettings();
+                AddinSettings current = _owner._currentSettings;
+                if (current == null)
+                {
+                    _attachmentAutomationSettingsSnapshot = local;
+                    _attachmentAutomationSettingsSnapshotUtc = DateTime.UtcNow;
+                    return;
+                }
+
+                var configuration = new TalkServiceConfiguration(
+                    current.ServerUrl,
+                    current.Username,
+                    current.AppPassword);
+                _attachmentAutomationSettingsRefreshTask = RefreshAttachmentAutomationSettingsAsync(
+                    local,
+                    configuration);
+                RunAttachmentFlowTask(
+                    _attachmentAutomationSettingsRefreshTask,
+                    "Compose attachment policy refresh failed");
+            }
+
+            private async Task<AttachmentAutomationSettings> RefreshAttachmentAutomationSettingsAsync(
+                AttachmentAutomationSettings local,
+                TalkServiceConfiguration configuration)
+            {
+                AttachmentAutomationSettings resolved = local;
+                if (configuration != null && configuration.IsComplete())
+                {
+                    BackendPolicyStatus policyStatus = await Task.Run(
+                        () => _owner.FetchBackendPolicyStatus(
+                            configuration,
+                            "compose_attachment_evaluate")).ConfigureAwait(false);
+                    resolved = ApplyAttachmentAutomationPolicy(
+                        local,
+                        policyStatus);
+                }
+
+                _attachmentAutomationSettingsSnapshot = resolved;
+                _attachmentAutomationSettingsSnapshotUtc = DateTime.UtcNow;
+                return resolved;
+            }
+
+            private AttachmentAutomationSettings ReadLocalAttachmentAutomationSettings()
             {
                 _owner.EnsureSettingsLoaded();
 
@@ -408,34 +501,44 @@ namespace NcTalkOutlookAddIn
                 int thresholdMb = OutlookAttachmentAutomationGuardService.NormalizeThresholdMb(settings.SharingAttachmentsOfferAboveMb);
                 bool alwaysConnector = settings.SharingAttachmentsAlwaysConnector;
                 bool offerAboveEnabled = settings.SharingAttachmentsOfferAboveEnabled && !alwaysConnector;
-                if (_owner._currentSettings != null)
+                return new AttachmentAutomationSettings
                 {
-                    var configuration = new TalkServiceConfiguration(
-                        _owner._currentSettings.ServerUrl,
-                        _owner._currentSettings.Username,
-                        _owner._currentSettings.AppPassword);
-                    BackendPolicyStatus policyStatus = await Task.Run(() => _owner.FetchBackendPolicyStatus(configuration, "compose_attachment_evaluate")).ConfigureAwait(false);
-                    if (policyStatus != null && policyStatus.IsDomainActive("share"))
-                    {
-                        bool policyBool;
-                        int policyInt;
+                    AlwaysConnector = alwaysConnector,
+                    OfferAboveEnabled = offerAboveEnabled,
+                    ThresholdMb = thresholdMb,
+                    ThresholdBytes = (long)thresholdMb * 1024L * 1024L
+                };
+            }
 
-                        if (policyStatus.IsLocked("share", "attachments_always_via_ncconnector")
-                            && policyStatus.TryGetPolicyBool("share", "attachments_always_via_ncconnector", out policyBool))
+            private static AttachmentAutomationSettings ApplyAttachmentAutomationPolicy(
+                AttachmentAutomationSettings local,
+                BackendPolicyStatus policyStatus)
+            {
+                bool alwaysConnector = local != null && local.AlwaysConnector;
+                bool offerAboveEnabled = local != null && local.OfferAboveEnabled;
+                int thresholdMb = local != null
+                    ? local.ThresholdMb
+                    : AddinSettings.DefaultSharingAttachmentsOfferAboveMb;
+                if (policyStatus != null && policyStatus.IsDomainActive("share"))
+                {
+                    bool policyBool;
+                    int policyInt;
+
+                    if (policyStatus.IsLocked("share", "attachments_always_via_ncconnector")
+                        && policyStatus.TryGetPolicyBool("share", "attachments_always_via_ncconnector", out policyBool))
+                    {
+                        alwaysConnector = policyBool;
+                    }
+                    if (policyStatus.IsLocked("share", "attachments_min_size_mb"))
+                    {
+                        if (policyStatus.TryGetPolicyInt("share", "attachments_min_size_mb", out policyInt))
                         {
-                            alwaysConnector = policyBool;
+                            thresholdMb = OutlookAttachmentAutomationGuardService.NormalizeThresholdMb(policyInt);
+                            offerAboveEnabled = true;
                         }
-                        if (policyStatus.IsLocked("share", "attachments_min_size_mb"))
+                        else if (policyStatus.HasPolicyKey("share", "attachments_min_size_mb"))
                         {
-                            if (policyStatus.TryGetPolicyInt("share", "attachments_min_size_mb", out policyInt))
-                            {
-                                thresholdMb = OutlookAttachmentAutomationGuardService.NormalizeThresholdMb(policyInt);
-                                offerAboveEnabled = true;
-                            }
-                            else if (policyStatus.HasPolicyKey("share", "attachments_min_size_mb"))
-                            {
-                                offerAboveEnabled = false;
-                            }
+                            offerAboveEnabled = false;
                         }
                     }
                 }
@@ -446,6 +549,146 @@ namespace NcTalkOutlookAddIn
                     ThresholdMb = thresholdMb,
                     ThresholdBytes = (long)thresholdMb * 1024L * 1024L
                 };
+            }
+
+            private bool TryValidateAttachmentPolicyBeforeSend(ref bool cancel)
+            {
+                if (_disposed || cancel)
+                {
+                    return !cancel;
+                }
+
+                int attachmentCount = CountPolicyRelevantAttachments();
+                if (attachmentCount <= 0)
+                {
+                    return true;
+                }
+
+                if (_attachmentAutomationSettingsSnapshot == null
+                    && _owner.SettingsAreComplete())
+                {
+                    BeginAttachmentAutomationSettingsRefresh();
+                    cancel = true;
+                    ShowForcedAttachmentProcessingError();
+                    LogFileLink(
+                        "Compose send blocked while attachment policy snapshot is pending (composeKey="
+                        + _composeKey
+                        + ").");
+                    return false;
+                }
+
+                AttachmentAutomationSettings settings =
+                    ReadAttachmentAutomationSettings();
+                if (!settings.AlwaysConnector)
+                {
+                    return true;
+                }
+
+                OutlookAttachmentAutomationGuardService.GuardState guardState;
+                if (_owner.TryGetAttachmentAutomationGuardState(
+                    "send_gate",
+                    _composeKey,
+                    out guardState))
+                {
+                    cancel = true;
+                    ShowForcedAttachmentProcessingError();
+                    return false;
+                }
+
+                cancel = true;
+                ShowForcedAttachmentProcessingError();
+                LogFileLink(
+                    "Compose send blocked by required attachment routing (composeKey="
+                    + _composeKey
+                    + ", remainingAttachments="
+                    + attachmentCount.ToString(CultureInfo.InvariantCulture)
+                    + ").");
+                return false;
+            }
+
+            private int CountPolicyRelevantAttachments()
+            {
+                Outlook.Attachments attachments = null;
+                int relevant = 0;
+                try
+                {
+                    attachments = _mail != null ? _mail.Attachments : null;
+                    int count = attachments != null ? attachments.Count : 0;
+                    for (int i = 1; i <= count; i++)
+                    {
+                        Outlook.Attachment attachment = null;
+                        try
+                        {
+                            attachment = attachments[i];
+                            if (attachment != null
+                                && !IsHiddenAttachment(attachment))
+                            {
+                                relevant++;
+                            }
+                        }
+                        finally
+                        {
+                            ComInteropScope.TryRelease(
+                                attachment,
+                                LogCategories.FileLink,
+                                "Failed to release send-gate attachment.");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticsLogger.LogException(
+                        LogCategories.FileLink,
+                        "Failed to inspect attachments for required routing (composeKey=" + _composeKey + ").",
+                        ex);
+                    return int.MaxValue;
+                }
+                finally
+                {
+                    ComInteropScope.TryRelease(
+                        attachments,
+                        LogCategories.FileLink,
+                        "Failed to release send-gate Attachments collection.");
+                }
+                return relevant;
+            }
+
+            private static bool IsHiddenAttachment(Outlook.Attachment attachment)
+            {
+                Outlook.PropertyAccessor accessor = null;
+                try
+                {
+                    accessor = attachment != null
+                        ? attachment.PropertyAccessor
+                        : null;
+                    object value = accessor != null
+                        ? accessor.GetProperty(
+                            "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B")
+                        : null;
+                    return value is bool && (bool)value;
+                }
+                catch
+                {
+                    return false;
+                }
+                finally
+                {
+                    ComInteropScope.TryRelease(
+                        accessor,
+                        LogCategories.FileLink,
+                        "Failed to release attachment PropertyAccessor.");
+                }
+            }
+
+            private static void ShowForcedAttachmentProcessingError()
+            {
+                MessageBox.Show(
+                    Strings.FileLinkWizardAttachmentModeReasonAlways
+                    + "\r\n\r\n"
+                    + Strings.FileLinkWizardUploadFailed,
+                    Strings.DialogTitle,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
             }
 
             private List<AttachmentSnapshot> SnapshotAttachments()
@@ -468,6 +711,10 @@ namespace NcTalkOutlookAddIn
                         {
                             attachment = attachments[index];
                             if (attachment == null)
+                            {
+                                continue;
+                            }
+                            if (IsHiddenAttachment(attachment))
                             {
                                 continue;
                             }
@@ -1082,6 +1329,10 @@ namespace NcTalkOutlookAddIn
                             {
                                 continue;
                             }
+                            if (IsHiddenAttachment(attachment))
+                            {
+                                continue;
+                            }
                             string attachmentName = ReadAttachmentName(attachment);
                             string localPath;
                             if (!TryResolveAttachmentLocalPath(attachment, attachmentName, temporaryFiles, out localPath))
@@ -1202,23 +1453,21 @@ namespace NcTalkOutlookAddIn
                 return Path.Combine(fallbackDirectory, fileName);
             }
 
-            private async void RunAttachmentFlowTask(Task task, string failureMessage)
+            private void RunAttachmentFlowTask(Task task, string failureMessage)
             {
                 if (task == null)
                 {
                     return;
                 }
-                try
-                {
-                    await task;
-                }
-                catch (Exception ex)
-                {
-                    DiagnosticsLogger.LogException(
+                task.ContinueWith(
+                    failedTask => DiagnosticsLogger.LogException(
                         LogCategories.FileLink,
-                        (failureMessage ?? "Compose attachment flow failed") + " (composeKey=" + _composeKey + ").",
-                        ex);
-                }
+                        (failureMessage ?? "Compose attachment flow failed")
+                        + " (composeKey="
+                        + _composeKey
+                        + ").",
+                        failedTask.Exception),
+                    TaskContinuationOptions.OnlyOnFaulted);
             }
 
             private void RestartBeforeAddShareTimerIfNeeded()
@@ -1293,6 +1542,10 @@ namespace NcTalkOutlookAddIn
                         {
                             attachment = attachments[index];
                             if (attachment == null)
+                            {
+                                continue;
+                            }
+                            if (IsHiddenAttachment(attachment))
                             {
                                 continue;
                             }
@@ -1413,51 +1666,15 @@ namespace NcTalkOutlookAddIn
             private void RemoveLastAddedAttachmentBatch(AttachmentBatchInfo lastAdded)
             {
                 int removeCount = lastAdded != null ? Math.Max(1, lastAdded.Count) : 1;
-
-                Outlook.Attachments attachments = null;
-                int removed = 0;
-                _attachmentSuppressed = true;
-                _pendingAddedBatch.Clear();
-
-                try
+                List<AttachmentSnapshot> attachments = SnapshotAttachments();
+                var removeIndices = new List<int>();
+                for (int index = attachments.Count - 1;
+                     index >= 0 && removeIndices.Count < removeCount;
+                     index--)
                 {
-                    attachments = _mail.Attachments;
-                    if (attachments == null || attachments.Count <= 0)
-                    {
-                        return;
-                    }
-                    int totalCount = attachments.Count;
-                    int effectiveCount = Math.Min(totalCount, removeCount);
-                    for (int i = 0; i < effectiveCount; i++)
-                    {
-                        attachments.Remove(attachments.Count);
-                        removed++;
-                    }
+                    removeIndices.Add(attachments[index].Index);
                 }
-                catch (Exception ex)
-                {
-                    DiagnosticsLogger.LogException(
-                        LogCategories.FileLink,
-                        "Failed to remove last attachment batch (composeKey=" + _composeKey + ").",
-                        ex);
-                }
-                finally
-                {
-                    ComInteropScope.TryRelease(
-                        attachments,
-                        LogCategories.FileLink,
-                        "Failed to release COM object (compose attachments collection remove_last).");
-                    EndAttachmentSuppression("remove_last_batch");
-                }
-
-                LogFileLink(
-                    "Compose attachment batch removed (composeKey="
-                    + _composeKey
-                    + ", requested="
-                    + removeCount.ToString(CultureInfo.InvariantCulture)
-                    + ", removed="
-                    + removed.ToString(CultureInfo.InvariantCulture)
-                    + ").");
+                RemoveAttachmentsByIndices(removeIndices, "remove_last_batch");
             }
 
             private void EndAttachmentSuppression(string trigger)

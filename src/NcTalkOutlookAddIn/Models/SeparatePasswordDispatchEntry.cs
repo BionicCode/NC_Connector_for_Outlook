@@ -28,6 +28,10 @@ namespace NcTalkOutlookAddIn.Models
 
         internal string PlainText { get; set; }
 
+        internal string SecretsHtmlTemplate { get; set; }
+
+        internal string SecretsPlainTextTemplate { get; set; }
+
         internal bool IsPlainText { get; set; }
 
         internal SharePasswordDeliveryMode DeliveryMode { get; set; }
@@ -49,5 +53,15 @@ namespace NcTalkOutlookAddIn.Models
         internal string SendUsingAccountSmtpAddress { get; set; }
 
         internal string SentOnBehalfOfName { get; set; }
+
+        internal bool SignatureActive { get; set; }
+
+        internal string SignatureUserEmail { get; set; }
+
+        internal string SignatureHtml { get; set; }
+
+        internal string SignaturePlainText { get; set; }
+
+        internal ComposeLifecycleOrigin Origin { get; set; }
     }
 }

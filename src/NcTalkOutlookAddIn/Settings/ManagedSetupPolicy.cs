@@ -116,24 +116,10 @@ namespace NcTalkOutlookAddIn.Settings
         private static string NormalizeNextcloudUrl(object rawValue)
         {
             string raw = rawValue as string;
-            if (string.IsNullOrWhiteSpace(raw))
-            {
-                return string.Empty;
-            }
-
-            string trimmed = raw.Trim().TrimEnd('/');
-            Uri uri;
-            if (!Uri.TryCreate(trimmed, UriKind.Absolute, out uri))
-            {
-                return string.Empty;
-            }
-            if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
-            {
-                return string.Empty;
-            }
-
-            return trimmed;
+            string normalized;
+            return NextcloudUriValidator.TryNormalizeBaseUrl(raw, out normalized)
+                ? normalized
+                : string.Empty;
         }
 
         private static bool ReadBoolean(object rawValue)

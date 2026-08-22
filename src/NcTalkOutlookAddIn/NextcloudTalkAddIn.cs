@@ -8,12 +8,9 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web;
 using System.Windows.Forms;
 using Extensibility;
 using Microsoft.Office.Core;
@@ -21,7 +18,6 @@ using NcTalkOutlookAddIn.Controllers;
 using NcTalkOutlookAddIn.Models;
 using NcTalkOutlookAddIn.Settings;
 using NcTalkOutlookAddIn.Services;
-using NcTalkOutlookAddIn.UI;
 using NcTalkOutlookAddIn.Utilities;
 using Outlook = Microsoft.Office.Interop.Outlook;
 
@@ -44,10 +40,11 @@ namespace NcTalkOutlookAddIn
         private Outlook.Inspectors _inspectors;
         private Outlook.Explorers _explorers;
         private Outlook.ExplorersEvents_Event _explorersEvents;
-        private readonly Dictionary<string, Outlook.Explorer> _inlineResponseExplorers = new Dictionary<string, Outlook.Explorer>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, Outlook.ExplorerEvents_10_Event> _inlineResponseExplorerEvents = new Dictionary<string, Outlook.ExplorerEvents_10_Event>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Outlook.Explorer> _hookedExplorers = new Dictionary<string, Outlook.Explorer>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Outlook.ExplorerEvents_10_Event> _hookedExplorerEvents = new Dictionary<string, Outlook.ExplorerEvents_10_Event>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Outlook.ExplorerEvents_10_InlineResponseEventHandler> _inlineResponseHandlers = new Dictionary<string, Outlook.ExplorerEvents_10_InlineResponseEventHandler>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Outlook.ExplorerEvents_10_InlineResponseCloseEventHandler> _inlineResponseCloseHandlers = new Dictionary<string, Outlook.ExplorerEvents_10_InlineResponseCloseEventHandler>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Outlook.ExplorerEvents_10_SelectionChangeEventHandler> _explorerSelectionChangeHandlers = new Dictionary<string, Outlook.ExplorerEvents_10_SelectionChangeEventHandler>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, MailComposeSubscription> _inlineResponseSubscriptions = new Dictionary<string, MailComposeSubscription>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, AppointmentSubscription> _subscriptionByEntryId = new Dictionary<string, AppointmentSubscription>(StringComparer.OrdinalIgnoreCase);
         private readonly MailComposeSubscriptionRegistryController _mailComposeSubscriptionRegistry = new MailComposeSubscriptionRegistryController();
@@ -62,8 +59,6 @@ namespace NcTalkOutlookAddIn
         private OutlookUiSynchronizationContext _uiSynchronizationContext;
         private IRibbonUI _ribbonUi;
         private const int ComposeAttachmentEvalDebounceMs = 250;
-        private const int ComposeShareCleanupSendGraceMs = 15000;
-
         internal const string IcalToken = "X-NCTALK-TOKEN";
         internal const string IcalUrl = "X-NCTALK-URL";
         internal const string IcalLobby = "X-NCTALK-LOBBY";
@@ -80,7 +75,8 @@ namespace NcTalkOutlookAddIn
         public NextcloudTalkAddIn()
         {
             _talkAppointmentController = new TalkAppointmentController(this);
-            _composeShareLifecycleController = new ComposeShareLifecycleController(this);
+            _composeShareLifecycleController =
+                new ComposeShareLifecycleController(this);
             _fileLinkLaunchController = new FileLinkLaunchController(this);
             _talkRibbonController = new TalkRibbonController(this);
             _mailInteropController = new MailInteropController(this);
@@ -248,17 +244,25 @@ namespace NcTalkOutlookAddIn
                 settings => _currentSettings = settings,
                 (configuration, trigger) => FetchBackendPolicyStatus(configuration, trigger),
                 settings => ConfigureDiagnosticsLogger(settings),
-                (source, showWarning) => TryApplyTransportSecurityFromSettings(source, showWarning),
+                (settings, source, showWarning) =>
+                    TryApplyTransportSecurityFromSettings(
+                        settings,
+                        source,
+                        showWarning),
                 () => ApplyIfbSettings(),
                 settings =>
                 {
                     if (_settingsStorage != null)
                     {
-                        _settingsStorage.Save(settings);
+                        _settingsStorage.SaveUserInitiated(settings);
                     }
                 },
                 callback => RunOnOutlookUiThreadAsync(callback),
-                message => LogSettings(message));
+                message => LogSettings(message),
+                _settingsStorage != null
+                    ? _settingsStorage.DataDirectory
+                    : string.Empty,
+                OutlookProfileScope);
         }
 
         public stdole.IPictureDisp OnGetButtonImage(IRibbonControl control)
@@ -329,7 +333,8 @@ namespace NcTalkOutlookAddIn
             Outlook.MailItem mail,
             string inspectorIdentityOverride = null,
             bool isInlineResponse = false,
-            string inlineExplorerIdentityOverride = null)
+            string inlineExplorerIdentityOverride = null,
+            Outlook.Inspector inspector = null)
         {
             if (mail == null)
             {
@@ -371,6 +376,7 @@ namespace NcTalkOutlookAddIn
             else
             {
                 subscription.MarkInspector(inspectorIdentityKey);
+                subscription.BindInspectorLifecycle(inspector);
             }
             return subscription;
         }
@@ -551,16 +557,6 @@ namespace NcTalkOutlookAddIn
             return _mailInteropController.IsActiveInlineResponse(mail);
         }
 
-        internal void InsertHtmlIntoMail(Outlook.MailItem mail, string html)
-        {
-            _mailInteropController.InsertHtmlIntoMail(mail, html);
-        }
-
-        internal void InsertPlainTextIntoMail(Outlook.MailItem mail, string plainText)
-        {
-            _mailInteropController.InsertPlainTextIntoMail(mail, plainText);
-        }
-
         internal static bool TryWriteAppointmentHtmlBody(Outlook.AppointmentItem appointment, string html)
         {
             return MailInteropController.TryWriteAppointmentHtmlBody(appointment, html);
@@ -609,7 +605,14 @@ namespace NcTalkOutlookAddIn
             try
             {
                 LogCore("Applying IFB (Enabled=" + _currentSettings.IfbEnabled + ", Days=" + _currentSettings.IfbDays + ", Port=" + _currentSettings.IfbPort + ", CacheHours=" + _currentSettings.IfbCacheHours + ").");
+                string legacyFreeBusyPath = _currentSettings.IfbPreviousFreeBusyPath;
                 _freeBusyManager.ApplySettings(_currentSettings);
+                if (!string.IsNullOrWhiteSpace(legacyFreeBusyPath)
+                    && string.IsNullOrWhiteSpace(_currentSettings.IfbPreviousFreeBusyPath)
+                    && _settingsStorage != null)
+                {
+                    _settingsStorage.Save(_currentSettings);
+                }
             }
             catch (Exception ex)
             {
@@ -686,33 +689,6 @@ namespace NcTalkOutlookAddIn
             }
 
             return localEnabled;
-        }
-
-        internal void QueueSavedEventRoomDeletion(string roomToken, bool isEventConversation)
-        {
-            if (string.IsNullOrWhiteSpace(roomToken))
-            {
-                return;
-            }
-
-            string normalizedRoomToken = roomToken.Trim();
-            Task.Run(() =>
-            {
-                try
-                {
-                    if (!ShouldDeleteTalkRoomOnSavedEventDelete())
-                    {
-                        LogTalk("Saved-event room deletion skipped (opt-in disabled, token=" + normalizedRoomToken + ").");
-                        return;
-                    }
-
-                    TryDeleteRoom(normalizedRoomToken, isEventConversation, false);
-                }
-                catch (Exception ex)
-                {
-                    DiagnosticsLogger.LogException(LogCategories.Talk, "Saved-event room deletion failed in background (token=" + normalizedRoomToken + ").", ex);
-                }
-            });
         }
 
         private void RefreshEntryBinding(AppointmentSubscription subscription)
@@ -961,9 +937,20 @@ namespace NcTalkOutlookAddIn
 
         private bool TryApplyTransportSecurityFromSettings(string source, bool showWarning)
         {
+            return TryApplyTransportSecurityFromSettings(
+                _currentSettings,
+                source,
+                showWarning);
+        }
+
+        private bool TryApplyTransportSecurityFromSettings(
+            AddinSettings settings,
+            string source,
+            bool showWarning)
+        {
             try
             {
-                TransportSecurityConfigurator.ApplyFromSettings(_currentSettings, source);
+                TransportSecurityConfigurator.ApplyFromSettings(settings, source);
                 return true;
             }
             catch (Exception ex)

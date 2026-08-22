@@ -41,8 +41,16 @@ namespace NcTalkOutlookAddIn
                 LogSettings("Settings loaded (AuthMode=" + _currentSettings.AuthMode + ", IFB=" + _currentSettings.IfbEnabled + ", IfbPort=" + _currentSettings.IfbPort + ", Debug=" + _currentSettings.DebugLoggingEnabled + ", LogAnonymize=" + _currentSettings.LogAnonymizationEnabled + ").");
             }
 
-            _freeBusyManager = new FreeBusyManager(_settingsStorage.DataDirectory);
+            _freeBusyManager = new FreeBusyManager(
+                _settingsStorage.DataDirectory,
+                outlookProfileName);
             _freeBusyManager.Initialize(_outlookApplication);
+            InitializeTalkAppointmentSync(outlookProfileName);
+            // Startup resumes durable deletion jobs. It does not enumerate calendars
+            // to rebuild subscriptions.
+            InitializeTalkRoomLifecycle(
+                _settingsStorage.DataDirectory,
+                outlookProfileName);
             EnsureApplicationHook();
             EnsureInspectorHook();
             ApplyIfbSettings();
@@ -264,6 +272,9 @@ namespace NcTalkOutlookAddIn
             UnhookApplication();
             UnhookInspector();
             UnhookMailComposeSubscriptions();
+            DisposeTalkAppointmentSync();
+            DisposeTalkAppointmentSubscriptions();
+            DisposeTalkRoomLifecycle();
             if (_freeBusyManager != null && _currentSettings != null && _currentSettings.IfbEnabled)
             {
                 try

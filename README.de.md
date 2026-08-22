@@ -40,14 +40,13 @@ Weitere Punkte:
 - Anhangsautomatisierung für große Anhänge oder immer über NC Connector, mit wählbarem Linkziel `ZIP-Download` (Standard) oder `Nextcloud-Freigabeseite`
 - ein lokaler Scan erstellt einen relativ zum Freigabeordner aufgebauten Uploadplan; der Zielordner wird atomar angelegt und die Anhangsautomatisierung probiert bei einer Kollision nummerierte Namen ohne vorherige Server-Abfrage
 - Ordner werden einmal vorbereitet; bis zu drei direkte Transfers laufen parallel, Dateien über 20 MiB verwenden Chunked Upload v2 und Gruppen kleiner Dateien nutzen DAV-Bulk nur bei Capability-Version `1.0` und mindestens 20 Prozent weniger Requests im vollständigen Plan
-- separate Passwortmails werden erst nach erfolgreichem Versand der Hauptmail verschickt
-- bei Auto-Send-Fehlern öffnet sich eine vorbereitete manuelle Passwortmail
+- optionale separate Passwortzustellung über das NC Connector Backend
 
 ## Talk
 
 Aus einem Outlook-Termin kann direkt ein Nextcloud Talk-Raum erstellt werden. Der Dialog unterstützt Lobby, Passwort, Raumtyp und Moderation.
 
-NC Connector kann Terminänderungen mit dem Raum abgleichen und eingeladene Teilnehmer übernehmen. Das Löschen gespeicherter Talk-Termine entfernt Räume nur nach ausdrücklicher Aktivierung.
+NC Connector kann Terminänderungen mit dem Raum abgleichen und eingeladene Teilnehmer übernehmen. Ist die Raumlöschung ausdrücklich aktiviert, stellt Outlooks Termin-Löschereignis den zugehörigen Raum zur Löschung ein. Ausstehende Löschungen werden nach einem Outlook-Neustart fortgesetzt; beim Start werden keine Kalender durchsucht.
 
 ## Signaturen
 
@@ -66,7 +65,7 @@ Updates werden durch Installation der neuen MSI über die bestehende Version ein
 
 ## Voraussetzungen
 
-- Windows 10 oder Windows 11
+- Windows 10 oder Windows 11 (64-Bit)
 - Outlook classic 2019 oder neuer
 - .NET Framework 4.7.2
 - Nextcloud 32 oder neuer

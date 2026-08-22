@@ -95,7 +95,7 @@ namespace NcTalkOutlookAddIn.Utilities
         private static readonly object InitLock = new object();
         private static bool _initialized;
         private static string _preferredUiLanguageCode;
-        private static string[] _languageCandidates = new[] { EnglishLanguageCode, DefaultLanguageCode };
+        private static string[] _languageCandidates = new[] { DefaultLanguageCode, EnglishLanguageCode };
 
         private static readonly object TranslationLock = new object();
         private static readonly Dictionary<string, Dictionary<string, string>> TranslationCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
@@ -141,10 +141,17 @@ namespace NcTalkOutlookAddIn.Utilities
             TryAddCulture(list, () => CultureInfo.CurrentCulture);
             TryAddCulture(list, () => CultureInfo.InstalledUICulture);
 
-            AddLanguageCandidate(list, EnglishLanguageCode);
             AddLanguageCandidate(list, DefaultLanguageCode);
+            AddLanguageCandidate(list, EnglishLanguageCode);
 
             return list.ToArray();
+        }
+
+        private static bool UsesGermanAdminGuide()
+        {
+            EnsureInitialized();
+            return _languageCandidates.Length > 0
+                   && string.Equals(_languageCandidates[0], DefaultLanguageCode, StringComparison.OrdinalIgnoreCase);
         }
 
         internal static void SetPreferredUiLanguage(string languageCode)
@@ -422,7 +429,7 @@ namespace NcTalkOutlookAddIn.Utilities
                 {
                     return Get(key, defaultValue);
                 }
-                foreach (string code in new[] { normalized, EnglishLanguageCode, DefaultLanguageCode })
+                foreach (string code in new[] { normalized, DefaultLanguageCode, EnglishLanguageCode })
                 {
                     Dictionary<string, string> dictionary = GetTranslationsForLanguage(code);
                     if (dictionary == null)
@@ -531,6 +538,7 @@ namespace NcTalkOutlookAddIn.Utilities
 
         internal static string ButtonSave { get { return Get("options_save_button", "Save"); } }
         internal static string ButtonCancel { get { return Get("ui_button_cancel", "Cancel"); } }
+        internal static string SettingsSaveFailed { get { return Get("options_status_save_failed", "Saving failed."); } }
 
         internal static string DebugCheckbox { get { return Get("outlook_debug_file_label", "Write debug log file"); } }
         internal static string DebugAnonymizeCheckbox { get { return Get("outlook_debug_anonymize_label", "Anonymize logs"); } }
@@ -570,7 +578,9 @@ namespace NcTalkOutlookAddIn.Utilities
         {
             get
             {
-                return "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.md#system-address-book";
+                return UsesGermanAdminGuide()
+                    ? "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.de.md#systemadressbuch"
+                    : "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.md#system-address-book";
             }
         }
         internal static string PolicyWarningTitle { get { return Get("policy_warning_title", "Backend policy is currently unavailable."); } }
@@ -583,7 +593,9 @@ namespace NcTalkOutlookAddIn.Utilities
         {
             get
             {
-                return "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.md";
+                return UsesGermanAdminGuide()
+                    ? "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.de.md"
+                    : "https://github.com/nc-connector/NC_Connector_for_Outlook/blob/main/docs/ADMIN.md";
             }
         }
         internal static string TalkVersionUnknown { get { return Get("outlook_version_unknown", "unknown"); } }
@@ -956,6 +968,7 @@ namespace NcTalkOutlookAddIn.Utilities
         internal static string FileLinkWizardStatusError { get { return Get("sharing_status_error_row", "Error"); } }
         internal static string FileLinkWizardStatusCancelled { get { return Get("outlook_sharing_status_cancelled", "Cancelled"); } }
         internal static string FileLinkWizardStatusScanning { get { return Get("sharing_status_scanning", "Scanning files and folders..."); } }
+        internal static string FileLinkWizardStatusCalculatingChecksumsFormat { get { return Get("sharing_status_calculating_checksums", "Calculating checksums ({0} / {1})..."); } }
         internal static string FileLinkWizardStatusPreparingFoldersFormat { get { return Get("sharing_status_preparing_folders", "Preparing folders ({0} / {1})..."); } }
         internal static string FileLinkWizardStatusUploadingSummaryFormat { get { return Get("sharing_status_uploading_summary", "Uploading files ({0} / {1}) — {2} / {3} — {4}"); } }
         internal static string FileLinkWizardStatusSpeedKbpsFormat { get { return Get("sharing_status_speed_kbps", "$1 KB/s"); } }
@@ -983,7 +996,7 @@ namespace NcTalkOutlookAddIn.Utilities
         internal static string SharingPasswordMailSubjectWithLabel { get { return Get("sharing_password_mail_subject_with_label", "Password for shared link: {0}"); } }
         internal static string SharingPasswordMailNotificationTitle { get { return Get("sharing_password_mail_notify_title", "NC Connector"); } }
         internal static string SharingPasswordMailNotificationSuccess { get { return Get("sharing_password_mail_notify_success", "Password email sent to {0} recipient(s)."); } }
-        internal static string SharingPasswordSecretsFallbackWarning { get { return Get("sharing_password_secrets_fallback_warning", "Nextcloud Secrets is not available. The password was sent as a separate plain-text email."); } }
+        internal static string SharingPasswordSecretsFallbackWarning { get { return Get("sharing_password_secrets_fallback_warning", "Nextcloud Secrets is not available. The password will instead be provided in a separate plain-text email."); } }
 
         // Generic dialog title
         internal static string DialogTitle { get { return Get("extName", "NC Connector for Outlook"); } }

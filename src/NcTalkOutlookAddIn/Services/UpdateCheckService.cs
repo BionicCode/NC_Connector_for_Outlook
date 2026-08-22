@@ -23,6 +23,8 @@ namespace NcTalkOutlookAddIn.Services
         private const string ProductKey = "outlook";
         private const string Channel = "stable";
         private const int TimeoutMs = 5000;
+        private const string ReleaseHost = "github.com";
+        private const string ReleasePathPrefix = "/nc-connector/NC_Connector_for_Outlook/releases/";
 
         internal async Task<UpdateCheckResult> CheckAsync(AddinSettings settings, bool force)
         {
@@ -47,6 +49,7 @@ namespace NcTalkOutlookAddIn.Services
                 string responseText = await FetchStringAsync(requestUrl).ConfigureAwait(false);
                 UpdateCheckResult result = ParseResponse(responseText);
                 result.CurrentVersion = currentVersion;
+                result.UpdateAvailable = IsNewerVersion(result.LatestVersion, currentVersion);
                 result.CheckedAtUtc = DateTime.UtcNow;
                 ApplyResult(settings, result);
                 DiagnosticsLogger.Log(
@@ -92,11 +95,13 @@ namespace NcTalkOutlookAddIn.Services
             {
                 return string.Empty;
             }
-            if (!string.IsNullOrWhiteSpace(result.DownloadUrl))
+
+            string trustedUrl = NormalizeReleaseTargetUrl(result.DownloadUrl);
+            if (!string.IsNullOrWhiteSpace(trustedUrl))
             {
-                return result.DownloadUrl.Trim();
+                return trustedUrl;
             }
-            return result.ReleaseUrl == null ? string.Empty : result.ReleaseUrl.Trim();
+            return NormalizeReleaseTargetUrl(result.ReleaseUrl);
         }
 
         internal static string BuildNotificationMessage(UpdateCheckResult result)
@@ -123,8 +128,8 @@ namespace NcTalkOutlookAddIn.Services
 
             result.CurrentVersion = AddinVersionInfo.GetVersion();
             result.LatestVersion = settings.UpdateLatestVersion ?? string.Empty;
-            result.ReleaseUrl = settings.UpdateReleaseUrl ?? string.Empty;
-            result.DownloadUrl = settings.UpdateDownloadUrl ?? string.Empty;
+            result.ReleaseUrl = NormalizeReleaseTargetUrl(settings.UpdateReleaseUrl);
+            result.DownloadUrl = NormalizeReleaseTargetUrl(settings.UpdateDownloadUrl);
             result.PublishedAt = settings.UpdatePublishedAt ?? string.Empty;
             result.ChangelogTitle = settings.UpdateChangelogTitle ?? string.Empty;
             result.ChangelogText = settings.UpdateChangelogText ?? string.Empty;
@@ -181,8 +186,8 @@ namespace NcTalkOutlookAddIn.Services
             var result = new UpdateCheckResult
             {
                 LatestVersion = NcJson.GetStringOrEmpty(payload, "latest_version"),
-                ReleaseUrl = NcJson.GetStringOrEmpty(payload, "release_url"),
-                DownloadUrl = NcJson.GetStringOrEmpty(payload, "download_url"),
+                ReleaseUrl = NormalizeReleaseTargetUrl(NcJson.GetStringOrEmpty(payload, "release_url")),
+                DownloadUrl = NormalizeReleaseTargetUrl(NcJson.GetStringOrEmpty(payload, "download_url")),
                 PublishedAt = NcJson.GetStringOrEmpty(payload, "published_at"),
                 Message = NcJson.GetStringOrEmpty(payload, "message"),
                 UpdateAvailable = GetBool(payload, "update_available"),
@@ -271,8 +276,8 @@ namespace NcTalkOutlookAddIn.Services
 
             settings.UpdateLastCheckedAtUtc = result.CheckedAtUtc.ToString("o", CultureInfo.InvariantCulture);
             settings.UpdateLatestVersion = result.LatestVersion ?? string.Empty;
-            settings.UpdateReleaseUrl = result.ReleaseUrl ?? string.Empty;
-            settings.UpdateDownloadUrl = result.DownloadUrl ?? string.Empty;
+            settings.UpdateReleaseUrl = NormalizeReleaseTargetUrl(result.ReleaseUrl);
+            settings.UpdateDownloadUrl = NormalizeReleaseTargetUrl(result.DownloadUrl);
             settings.UpdatePublishedAt = result.PublishedAt ?? string.Empty;
             settings.UpdateChangelogTitle = result.ChangelogTitle ?? string.Empty;
             settings.UpdateChangelogText = result.ChangelogText ?? string.Empty;
@@ -333,6 +338,25 @@ namespace NcTalkOutlookAddIn.Services
                 return false;
             }
             return latest > current;
+        }
+
+        private static string NormalizeReleaseTargetUrl(string rawUrl)
+        {
+            string normalizedUrl;
+            if (!NextcloudUriValidator.TryNormalizeHttpsUrl(rawUrl, out normalizedUrl))
+            {
+                return string.Empty;
+            }
+
+            Uri uri;
+            if (!Uri.TryCreate(normalizedUrl, UriKind.Absolute, out uri)
+                || !string.Equals(uri.Host, ReleaseHost, StringComparison.OrdinalIgnoreCase)
+                || !uri.AbsolutePath.StartsWith(ReleasePathPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return normalizedUrl;
         }
 
         private static string NormalizeVersion(string version)
