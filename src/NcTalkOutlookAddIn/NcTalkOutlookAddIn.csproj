@@ -247,6 +247,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\app.png" />
     <EmbeddedResource Include="Resources\header-solid-blue-164x48.png" />
+    <EmbeddedResource Include="Resources\header-transparent-164x48.png" />
     <EmbeddedResource Include="Resources\_locales\**\messages.json" />
   </ItemGroup>
   <ItemGroup>

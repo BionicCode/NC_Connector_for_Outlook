@@ -12,6 +12,8 @@ try {
     @'
 using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -436,6 +438,11 @@ internal static class OutlookFileLinkRenderingTests
             }
             StyleEquals(caseName + " item " + (index + 1) + " white space", parentStyle, "white-space", "nowrap");
             StyleEquals(caseName + " item " + (index + 1) + " vertical alignment", parentStyle, "vertical-align", "middle");
+            StyleEquals(caseName + " item " + (index + 1) + " font size", parentStyle, "font-size", "11pt");
+            Check(
+                caseName + " item " + (index + 1) + " font family",
+                parentStyle.ContainsKey("font-family") && parentStyle["font-family"].IndexOf("Calibri", StringComparison.OrdinalIgnoreCase) >= 0,
+                permissionCell.GetAttribute("style"));
             Check(caseName + " item " + (index + 1) + " permission wrapper is unbordered", !parentStyle.ContainsKey("border"), permissionCell.GetAttribute("style"));
 
             IElement nestedTable = SingleDirectChild(caseName + " item " + (index + 1) + " permission-group table", permissionCell, "table");
@@ -465,7 +472,7 @@ internal static class OutlookFileLinkRenderingTests
             IElement iconBody = SingleDirectChild(caseName + " icon table " + (index + 1) + " tbody", iconTable, "tbody");
             IElement iconRow = SingleDirectChild(caseName + " icon table " + (index + 1) + " row", iconBody, "tr");
             IElement iconCell = SingleDirectChild(caseName + " icon table " + (index + 1) + " bordered cell", iconRow, "td");
-            string expectedColor = enabledStates[index] ? "#0082c9" : "#c62828";
+            string expectedColor = enabledStates[index] ? BrandingAssets.BrandBlueHex : "#c62828";
             string expectedSymbol = enabledStates[index] ? "\u2713" : "\u2717";
             AttributeEquals(caseName + " icon " + (index + 1) + " width", iconCell, "width", "14");
             AttributeEquals(caseName + " icon " + (index + 1) + " height", iconCell, "height", "14");
@@ -494,8 +501,11 @@ internal static class OutlookFileLinkRenderingTests
             StyleEquals(caseName + " label " + (index + 1) + " white space", labelStyle, "white-space", "nowrap");
             StyleEquals(caseName + " label " + (index + 1) + " font weight", labelStyle, "font-weight", "600");
             StyleEquals(caseName + " label " + (index + 1) + " vertical alignment", labelStyle, "vertical-align", "middle");
-            Check(caseName + " label " + (index + 1) + " inherits font family", !labelStyle.ContainsKey("font-family"), labelCell.GetAttribute("style"));
-            Check(caseName + " label " + (index + 1) + " inherits font size", !labelStyle.ContainsKey("font-size"), labelCell.GetAttribute("style"));
+            StyleEquals(caseName + " label " + (index + 1) + " font size", labelStyle, "font-size", "11pt");
+            Check(
+                caseName + " label " + (index + 1) + " font family",
+                labelStyle.ContainsKey("font-family") && labelStyle["font-family"].IndexOf("Calibri", StringComparison.OrdinalIgnoreCase) >= 0,
+                labelCell.GetAttribute("style"));
             Check(caseName + " label " + (index + 1) + " localized text", string.Equals(labelCell.TextContent.Trim(), labels[index], StringComparison.Ordinal), labelCell.TextContent);
         }
     }
@@ -611,6 +621,95 @@ internal static class OutlookFileLinkRenderingTests
         AssertNoBreakFieldLabel("Built-in Nextcloud link field label", html, "Nextcloud link");
     }
 
+    private static void TestTransparentHeaderAssetContract()
+    {
+        FileLinkResult result = BuildResult(
+            "https://cloud.example.test/nc/s/AbCd1234",
+            "AbCd1234",
+            string.Empty);
+        string html = FileLinkHtmlBuilder.Build(result, new FileLinkRequest(), "en");
+        var parser = new HtmlParser();
+        IElement image = parser.ParseDocument(html).QuerySelector("img[src^='data:image/png;base64,']");
+        Check("Built-in header embeds a PNG data URI", image != null);
+        if (image == null)
+        {
+            return;
+        }
+
+        const string prefix = "data:image/png;base64,";
+        string source = image.GetAttribute("src") ?? string.Empty;
+        Check("Built-in header data URI is not empty", source.Length > prefix.Length, source);
+        if (!source.StartsWith(prefix, StringComparison.Ordinal) || source.Length <= prefix.Length)
+        {
+            return;
+        }
+
+        byte[] imageBytes = Convert.FromBase64String(source.Substring(prefix.Length));
+        using (var stream = new MemoryStream(imageBytes))
+        using (var bitmap = new Bitmap(stream))
+        {
+            Check("Header asset width", bitmap.Width == 164, bitmap.Width.ToString());
+            Check("Header asset height", bitmap.Height == 48, bitmap.Height.ToString());
+            Check("Header asset has a transparent canvas", bitmap.GetPixel(0, 0).A == 0);
+        }
+    }
+
+    private static void TestOutlookCompactFrameContract()
+    {
+        FileLinkResult result = BuildResult(
+            "https://cloud.example.test/nc/s/AbCd1234",
+            "AbCd1234",
+            "Example-password",
+            new DateTime(2026, 8, 1));
+        string html = FileLinkHtmlBuilder.Build(result, new FileLinkRequest(), "en");
+        var document = new HtmlParser().ParseDocument(html);
+
+        IElement outerTable = document.QuerySelector("div > table[role='presentation'][width='640']");
+        Check("Compact frame has a presentation outer table", outerTable != null, html);
+        if (outerTable != null)
+        {
+            AttributeEquals("Compact frame outer cellspacing", outerTable, "cellspacing", "0");
+            AttributeEquals("Compact frame outer cellpadding", outerTable, "cellpadding", "0");
+        }
+
+        IElement contentCell = document.QuerySelector("td[style*='padding:18px 18px 22px 18px']");
+        Check("Compact frame uses a Word-safe padded content cell", contentCell != null, html);
+        if (contentCell != null)
+        {
+            Dictionary<string, string> contentStyle = ParseStyle(contentCell);
+            StyleEquals("Compact frame content font size", contentStyle, "font-size", "11pt");
+            Check(
+                "Compact frame content font family",
+                contentStyle.ContainsKey("font-family") && contentStyle["font-family"].IndexOf("Calibri", StringComparison.OrdinalIgnoreCase) >= 0,
+                contentCell.GetAttribute("style"));
+
+            IElement fieldTable = contentCell.QuerySelector("table[role='presentation']");
+            Check("Compact frame has a field table", fieldTable != null, html);
+            if (fieldTable != null)
+            {
+                StyleEquals("Compact frame field table has no repeated Word paragraph margin", ParseStyle(fieldTable), "margin", "0");
+            }
+        }
+        IElement footerCell = document.QuerySelector("td[style*='padding:10px 18px 16px 18px']");
+        Check("Compact frame uses a Word-safe padded footer cell", footerCell != null, html);
+
+        IElement labelCell = document.QuerySelector("th[width='124']");
+        Check("Compact frame uses the Thunderbird-sized label column", labelCell != null, html);
+        if (labelCell != null)
+        {
+            Dictionary<string, string> labelStyle = ParseStyle(labelCell);
+            StyleEquals("Compact frame label width", labelStyle, "width", "124px");
+            StyleEquals("Compact frame label font size", labelStyle, "font-size", "11pt");
+        }
+
+        IElement headerLink = document.QuerySelector("td[bgcolor] > a");
+        Check("Compact frame has a header link", headerLink != null, html);
+        if (headerLink != null)
+        {
+            StyleEquals("Compact frame header link stays compact", ParseStyle(headerLink), "display", "inline-block");
+        }
+    }
+
     private static void TestCustomTemplateAttributeSafeValues()
     {
         const string expirationTemplate = "<time datetime=\"{EXPIRATIONDATE}\">{EXPIRATIONDATE}</time>";
@@ -652,6 +751,33 @@ internal static class OutlookFileLinkRenderingTests
             "{LINK_LABEL}");
     }
 
+    private static void TestCustomTemplateVisibleNoBreakMarkup()
+    {
+        const string template = "<p><nobr style=\"white-space: nowrap;\">{LINK_LABEL}</nobr></p>"
+            + "<p><nobr style=\"white-space: nowrap;\">{EXPIRATIONDATE}</nobr></p>";
+        BackendPolicyStatus policy = BuildCustomTemplatePolicy(template);
+        FileLinkResult result = BuildResult(
+            "https://cloud.example.test/nc/s/AbCd1234",
+            "AbCd1234",
+            string.Empty,
+            new DateTime(2026, 8, 1));
+        string html = FileLinkHtmlBuilder.Build(
+            result,
+            new FileLinkRequest(),
+            "custom",
+            policy);
+
+        var document = new HtmlParser().ParseDocument(html);
+        List<IElement> noBreakElements = document.QuerySelectorAll("nobr").ToList();
+        Check("Custom-template visible no-break elements survive sanitization", noBreakElements.Count == 2, html);
+        Check("Custom-template no-break label stays visible text", noBreakElements.Any(element => element.TextContent == "Nextcloud link"), html);
+        Check("Custom-template no-break date stays visible text", noBreakElements.Any(element => element.TextContent == "2026-08-01"), html);
+        foreach (IElement element in noBreakElements)
+        {
+            StyleEquals("Custom-template no-break style", ParseStyle(element), "white-space", "nowrap");
+        }
+    }
+
     private static void TestPlainTextNoBreakContract()
     {
         const string template = "<p>{LINK_LABEL}: {URL}</p><p>{EXPIRATIONDATE}</p>";
@@ -676,7 +802,10 @@ internal static class OutlookFileLinkRenderingTests
         Strings.SetPreferredUiLanguage("en");
         TestHtmlNoBreakEncoderContract();
         TestBuiltInNoBreakValues();
+        TestTransparentHeaderAssetContract();
+        TestOutlookCompactFrameContract();
         TestCustomTemplateAttributeSafeValues();
+        TestCustomTemplateVisibleNoBreakMarkup();
         TestPlainTextNoBreakContract();
         TestPermissionsHtmlContract();
         TestNormalModeUsesNextcloudLinkWording();
@@ -1171,6 +1300,7 @@ internal static class OutlookFileLinkRenderingTests
 }
 '@ | Set-Content -Path $attributeSafetyLocale -Encoding UTF8
     $resources = @(
+        "/resource:$((Resolve-Path (Join-Path $ProjectRoot 'src\NcTalkOutlookAddIn\Resources\header-transparent-164x48.png')).Path),NcTalkOutlookAddIn.Resources.header-transparent-164x48.png",
         "/resource:$((Resolve-Path (Join-Path $ProjectRoot 'src\NcTalkOutlookAddIn\Resources\_locales\en\messages.json')).Path),OutlookFileLinkRenderingTests.Resources._locales.en.messages.json",
         "/resource:$((Resolve-Path (Join-Path $ProjectRoot 'src\NcTalkOutlookAddIn\Resources\_locales\de\messages.json')).Path),OutlookFileLinkRenderingTests.Resources._locales.de.messages.json",
         "/resource:$((Resolve-Path $attributeSafetyLocale).Path),OutlookFileLinkRenderingTests.Resources._locales.fr.messages.json"
