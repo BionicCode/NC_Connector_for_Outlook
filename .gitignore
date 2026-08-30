@@ -2,7 +2,6 @@
 **/bin/
 **/obj/
 .vs/
-.vscode/
 
 # User-specific files
 *.user
@@ -26,7 +25,3 @@ dist/
 # Local NuGet package cache (machine-specific)
 packages/
 .ci/
-
-# AI
-AGENT*.md
-DOCUMENTATION.md
